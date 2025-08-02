@@ -38,6 +38,8 @@ iredapi_managerv*.py
 *.swp
 
 # scripts d'ús local
-generate_changelog.sh
-init_git_history.sh
-reorder_commits.sh
+*generate_changelog.sh
+*init_git_history.sh
+*reorder_commits.sh
+*.sh
+*.zip

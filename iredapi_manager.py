@@ -484,19 +484,19 @@ def cmd_session(args, session_mgr):
 
 def main():
     parser = argparse.ArgumentParser(
-      prog='iredapi',
-      description=(
+        prog='iredapi',
+        description=(
             '🔐 CLI per a l\'API iRedAdmin\n\n'
             'Pots usar la variable d\'entorn IREDAPI_INSECURE=1 per ignorar errors SSL.\n'
             'Opció -k / --insecure equivalent a curl -k.\n'
             'La URL base per defecte és https://localhost/iredadmin però la pots canviar amb:\n'
             '  --url o la variable d\'entorn IREDAPI_URL\n'
             'però si indiques --raw, el JSON es mostra en format normal (sense codi de color).'
-      ),
-      epilog=(
+        ),
+        epilog=(
             ' ℹ️ Per a més ajuda, usa --help o ajuda subcomanda.\n'
             ' ℹ️ Per a més informació sobre les API, visita: https://iredmail.org/api.html\n'
-      ),)
+        ),)
     parser.add_argument('--url', default=API_BASE, help='URL base de l\'API')
     parser.add_argument('-k', '--insecure', action='store_true', help='Ignora errors de certificat SSL')
     parser.add_argument('-r', '--raw', action='store_true', help='Sortida RAW sense colors')
