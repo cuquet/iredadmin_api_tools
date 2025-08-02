@@ -1,30 +1,45 @@
 #!/usr/bin/env python3
-import requests
-import argparse
+import sys
 import os
 import json
-import warnings
+import argparse
 from http.cookiejar import MozillaCookieJar
-from urllib3.exceptions import NotOpenSSLWarning
+import warnings
 
 '''
-🧪 Exemples d’ús:
-🔐 Login:
+⚡️ Com utilitzar
+
+# Login (ignora SSL)
 python3 iredapi.py login --username postmaster@melindro.org --password <password> -k
 
-O, amb variable d’entorn:
-IREDAPI_INSECURE=1 python3 iredapi.py login --username postmaster@melindro.org --password pwd
+# Crida a l'API amb cookies guardades
+python3 iredapi.py call --endpoint /api/spampolicy/global
 
-📡 Crida a l’API:
-python3 iredapi.py call --endpoint /api/spampolicy/global -k
+# Crida a l'API passant token manual
+python3 iredapi.py call --endpoint /api/spampolicy/global --token TOKEN
 
-🆘 Ajuda CLI
-python3 iredapi.py --help
-python3 iredapi.py login --help
-
+# Esborrar cookies
+python3 iredapi.py logout
 '''
 
+# Comprovació de dependències
+missing = []
+try:
+    import requests
+except ImportError:
+    missing.append("requests")
+try:
+    import urllib3
+except ImportError:
+    missing.append("urllib3")
 
+if missing:
+    print(f"❌ Dependències mancants: {', '.join(missing)}")
+    print("🔧 Executa: pip install " + ' '.join(missing))
+    sys.exit(1)
+
+import requests
+from urllib3.exceptions import NotOpenSSLWarning
 
 # Evita avís per LibreSSL (macOS)
 warnings.simplefilter("ignore", NotOpenSSLWarning)
@@ -40,8 +55,15 @@ def get_session(cookie_file):
     return session
 
 def should_skip_ssl_verification(args):
-    """Determina si s’ha d’ignorar SSL (via -k o IREDAPI_INSECURE)"""
     return args.insecure or os.getenv('IREDAPI_INSECURE') == '1'
+
+def jp(data):
+    """Json pretty print"""
+    try:
+        obj = json.loads(data) if isinstance(data, str) else data
+        print(json.dumps(obj, indent=2, ensure_ascii=False))
+    except Exception:
+        print(data)  # fallback, print raw
 
 def login(args):
     session = get_session(args.cookies)
@@ -62,7 +84,7 @@ def login(args):
 
     session.cookies.save(ignore_discard=True, ignore_expires=True)
     print(f"✅ Login correcte. Token: {token[:10]}...")
-    print(json.dumps(json_resp, indent=2))
+    jp(json_resp)
 
 def call(args):
     session = get_session(args.cookies)
@@ -79,39 +101,52 @@ def call(args):
         return
 
     print("✅ Resposta de l'API:")
-    print(json.dumps(resp.json(), indent=2))
+    jp(resp.text)
+
+def logout(args):
+    try:
+        os.remove(args.cookies)
+        print(f"✅ Fitxer de cookies '{args.cookies}' eliminat.")
+    except FileNotFoundError:
+        print(f"ℹ️ Fitxer de cookies '{args.cookies}' no existeix.")
+    except Exception as e:
+        print(f"❌ Error eliminant cookies: {e}")
 
 def main():
     parser = argparse.ArgumentParser(
         prog='iredapi',
-        description='🔐 Eina CLI per consultar l\'API d\'iRedAdmin',
+        description='🔐 CLI per a l\'API iRedAdmin\n\n'
+                    'Pots usar la variable d\'entorn IREDAPI_INSECURE=1 per ignorar errors SSL.\n'
+                    'Opció -k / --insecure equivalent a curl -k.\n'
+                    'Usa la subcomanda "jp" per mostrar JSON bonic (json pretty print).\n',
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.set_defaults(func=lambda args: parser.print_help())
 
     subparsers = parser.add_subparsers(title='Subcomandes', dest='command')
 
-    # 🔐 LOGIN
     login_parser = subparsers.add_parser('login', help='Fes login i desa cookies')
     login_parser.add_argument('--url', default=DEFAULT_URL, help='URL base de l\'API')
-    login_parser.add_argument('--username', required=True, help='Nom d\'usuari (ex: postmaster@domini)')
+    login_parser.add_argument('--username', required=True, help='Nom d\'usuari')
     login_parser.add_argument('--password', required=True, help='Contrasenya')
-    login_parser.add_argument('--cookies', default=DEFAULT_COOKIE_JAR, help='Fitxer per desar cookies')
+    login_parser.add_argument('--cookies', default=DEFAULT_COOKIE_JAR, help='Fitxer cookies')
     login_parser.add_argument('-k', '--insecure', action='store_true', help='Ignora errors SSL (com curl -k)')
     login_parser.set_defaults(func=login)
 
-    # 📡 CALL
     call_parser = subparsers.add_parser('call', help='Crida a un endpoint protegit')
     call_parser.add_argument('--url', default=DEFAULT_URL, help='URL base de l\'API')
-    call_parser.add_argument('--endpoint', required=True, help='Endpoint d\'API (ex: /api/spampolicy/global)')
-    call_parser.add_argument('--token', help='Token Bearer (si no es vol usar cookies)')
-    call_parser.add_argument('--cookies', default=DEFAULT_COOKIE_JAR, help='Fitxer de cookies')
+    call_parser.add_argument('--endpoint', required=True, help='Endpoint API (ex: /api/spampolicy/global)')
+    call_parser.add_argument('--token', help='Token Bearer (si no vols usar cookies)')
+    call_parser.add_argument('--cookies', default=DEFAULT_COOKIE_JAR, help='Fitxer cookies')
     call_parser.add_argument('-k', '--insecure', action='store_true', help='Ignora errors SSL (com curl -k)')
     call_parser.set_defaults(func=call)
+
+    logout_parser = subparsers.add_parser('logout', help='Esborra el fitxer de cookies')
+    logout_parser.add_argument('--cookies', default=DEFAULT_COOKIE_JAR, help='Fitxer cookies')
+    logout_parser.set_defaults(func=logout)
 
     args = parser.parse_args()
     args.func(args)
 
 if __name__ == '__main__':
     main()
-
