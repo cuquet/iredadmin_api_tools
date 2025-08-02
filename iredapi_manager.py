@@ -22,16 +22,33 @@ Quan fas login o crides API, veuràs un spinner ASCII | / - \ per indicar que es
 El JSON que imprimeix està acolorit per tipus de valor amb codis ANSI, compatible amb la majoria de terminals.
 Pots passar la URL base via variable IREDAPI_URL o per l’argument --url (té prioritat l’argument).
 Opció -k o variable IREDAPI_INSECURE=1 per ignorar errors SSL (com curl -k).
-Opció --raw per mostrar sortida neta (sense colors, prefixos o missatges).
 
-# Mostrar token formatat:
+# Login (ignora SSL)
+python3 iredapi.py login --username postmaster@melindro.org --password pwd -k
+
+# Crida a l'API amb cookies guardades
+python3 iredapi.py call --endpoint /api/spampolicy/global
+
+# Crida a l'API passant token manual
+python3 iredapi.py call --endpoint /api/spampolicy/global --token CfOM847tVQkSm-UDiGUYHTFBuOcQ1XcswBaumgluoB8=
+
+# Crida POST amb dades JSON
+python3 iredapi.py call --method POST --endpoint /api/user --data '{"name":"Joan"}'
+
+# Esborrar cookies
+python3 iredapi.py logout
+
+# Mostrar token
 $ python3 iredapi.py token
 🔑 Token actual: xQKa_TszBU...
 
-# Mostrar token pur (sense colors ni text extra):
 $ python3 iredapi.py token --raw
 xQKa_TszBU...
+
+$ python3 iredapi.py token 
+❌ No s'ha trobat cap token desat. Fes login primer.
 '''
+
 
 # === COLORS ANSI sense dependències externes ===
 class AnsiColor:
@@ -61,13 +78,10 @@ def colorize_json(obj):
     else:
         return str(obj)
 
-def jp(data, raw=False):
-    """Pretty print JSON acolorit o net."""
+def jp(data):
+    """Pretty print JSON amb colors ANSI."""
     try:
         obj = json.loads(data) if isinstance(data, str) else data
-        if raw:
-            print(json.dumps(obj, indent=2, ensure_ascii=False))
-            return
         pretty = json.dumps(obj, indent=2, ensure_ascii=False)
         lines = pretty.splitlines()
         for line in lines:
@@ -113,6 +127,9 @@ class Spinner:
 
 def get_session(cookie_file):
     from http.cookiejar import MozillaCookieJar
+    import os
+    import requests
+
     session = requests.Session()
     session.cookies = MozillaCookieJar(cookie_file)
     if os.path.exists(cookie_file):
@@ -120,8 +137,8 @@ def get_session(cookie_file):
     return session
 
 def should_skip_ssl_verification(args):
-    # Ignora errors SSL si --insecure o variable d'entorn
-    return getattr(args, 'insecure', False) or os.getenv('IREDAPI_INSECURE') == '1'
+    # Ignora errors SSL si --insecure o variable d'entorn IREDAPI_INSECURE=1
+    return args.insecure or os.getenv('IREDAPI_INSECURE') == '1'
 
 def login(args):
     session = get_session(args.cookies)
@@ -147,18 +164,17 @@ def login(args):
         return
 
     session.cookies.save(ignore_discard=True, ignore_expires=True)
-    if not args.raw:
-        print(f"{AnsiColor.GREEN}✅ Login correcte. Token: {token[:10]}...{AnsiColor.RESET}")
+    print(f"{AnsiColor.GREEN}✅ Login correcte. Token: {token[:10]}...{AnsiColor.RESET}")
     with open(os.path.expanduser('~/.iredapi_token'), 'w') as f:
         f.write(token)
-    jp(json_resp, raw=args.raw)
+    jp(json_resp)
 
 def call(args):
     session = get_session(args.cookies)
     url = f"{args.url}{args.endpoint}"
     verify = not should_skip_ssl_verification(args)
 
-    headers = {}
+    headers = {'Content-Type': 'application/json'}
     token = args.token
     if not token:
         token_file = os.path.expanduser('~/.iredapi_token')
@@ -174,40 +190,57 @@ def call(args):
     spinner = Spinner("Cridant a l'API...")
     spinner.start()
     try:
-        resp = session.get(url, headers=headers, verify=verify)
+        method = args.method.upper()
+        data_to_send = args.data.encode('utf-8') if args.data else None
+
+        if method == 'GET':
+            resp = session.get(url, headers=headers, verify=verify)
+        elif method == 'POST':
+            resp = session.post(url, headers=headers, verify=verify, data=data_to_send)
+        elif method == 'PUT':
+            resp = session.put(url, headers=headers, verify=verify, data=data_to_send)
+        elif method == 'DELETE':
+            resp = session.delete(url, headers=headers, verify=verify)
+        elif method == 'PATCH':
+            resp = session.patch(url, headers=headers, verify=verify, data=data_to_send)
+        else:
+            print(f"{AnsiColor.RED}❌ Mètode HTTP no suportat: {method}{AnsiColor.RESET}")
+            spinner.stop()
+            return
     finally:
         spinner.stop()
 
-    if resp.status_code != 200:
+    if resp.status_code not in (200, 201, 204):
         print(f"{AnsiColor.RED}❌ Error API ({resp.status_code}):{AnsiColor.RESET} {resp.text}")
         return
 
-    if not args.raw:
-        print(f"{AnsiColor.GREEN}✅ Resposta de l'API:{AnsiColor.RESET}")
-    jp(resp.text, raw=args.raw)
+    print(f"{AnsiColor.GREEN}✅ Resposta de l'API:{AnsiColor.RESET}")
+    if resp.text:
+        jp(resp.text)
+    else:
+        print("(Sense contingut de resposta)")
 
 def logout(args):
     """Esborra fitxers de sessió: cookies i token."""
+    # Esborra el fitxer de cookies
     try:
         os.remove(args.cookies)
-        if not args.raw:
-            print(f"{AnsiColor.GREEN}✅ Fitxer de cookies '{args.cookies}' eliminat.{AnsiColor.RESET}")
+        print(f"{AnsiColor.GREEN}✅ Fitxer de cookies '{args.cookies}' eliminat.{AnsiColor.RESET}")
     except FileNotFoundError:
-        if not args.raw:
-            print(f"ℹ️ Fitxer de cookies '{args.cookies}' no existeix.")
+        print(f"ℹ️ Fitxer de cookies '{args.cookies}' no existeix.")
     except Exception as e:
         print(f"{AnsiColor.RED}❌ Error eliminant cookies: {e}{AnsiColor.RESET}")
 
+    # Esborra el fitxer de token
     token_file = os.path.expanduser('~/.iredapi_token')
     try:
         os.remove(token_file)
-        if not args.raw:
-            print(f"{AnsiColor.GREEN}✅ Fitxer de token '{token_file}' eliminat.{AnsiColor.RESET}")
+        print(f"{AnsiColor.GREEN}✅ Fitxer de token '{token_file}' eliminat.{AnsiColor.RESET}")
     except FileNotFoundError:
-        if not args.raw:
-            print(f"ℹ️ Fitxer de token '{token_file}' no existeix.")
+        print(f"ℹ️ Fitxer de token '{token_file}' no existeix.")
     except Exception as e:
         print(f"{AnsiColor.RED}❌ Error eliminant token: {e}{AnsiColor.RESET}")
+
 
 def show_token(args):
     """Mostra el token d'autenticació desat, amb o sense format."""
@@ -220,10 +253,8 @@ def show_token(args):
         else:
             print(f"{AnsiColor.GREEN}🔑 Token actual:{AnsiColor.RESET} {token}")
     else:
-        if not args.raw:
-            print(f"{AnsiColor.RED}❌ No s'ha trobat cap token desat. Fes login primer.{AnsiColor.RESET}")
-        else:
-            sys.exit(1)
+        print(f"{AnsiColor.RED}❌ No s'ha trobat cap token desat. Fes login primer.{AnsiColor.RESET}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -234,35 +265,38 @@ def main():
             'Opció -k / --insecure equivalent a curl -k.\n'
             'La URL base per defecte és https://localhost/iredadmin però la pots canviar amb:\n'
             '  --url o la variable d\'entorn IREDAPI_URL\n'
+            'Usa la subcomanda "jp" (integrada) per mostrar JSON bonic.\n'
         ),
         formatter_class=argparse.RawTextHelpFormatter
     )
-    parser.add_argument('--raw', action='store_true', help='Mostra sortida sense format (text pla)')
     parser.set_defaults(func=lambda args: parser.print_help())
 
     subparsers = parser.add_subparsers(title='Subcomandes', dest='command')
 
     login_parser = subparsers.add_parser('login', help='Fes login i desa cookies')
-    login_parser.add_argument('--url', default=DEFAULT_URL, help='URL base de l\'API')
+    login_parser.add_argument('--url', default=DEFAULT_URL, help='URL base de l\'API (ex: https://localhost/iredadmin)')
     login_parser.add_argument('--username', required=True, help='Nom d\'usuari')
     login_parser.add_argument('--password', required=True, help='Contrasenya')
     login_parser.add_argument('--cookies', default=DEFAULT_COOKIE_JAR, help='Fitxer cookies')
-    login_parser.add_argument('-k', '--insecure', action='store_true', help='Ignora errors SSL')
+    login_parser.add_argument('-k', '--insecure', action='store_true', help='Ignora errors SSL (com curl -k)')
     login_parser.set_defaults(func=login)
 
     call_parser = subparsers.add_parser('call', help='Crida a un endpoint protegit')
     call_parser.add_argument('--url', default=DEFAULT_URL, help='URL base de l\'API')
-    call_parser.add_argument('--endpoint', required=True, help='Endpoint API')
-    call_parser.add_argument('--token', help='Token Bearer')
+    call_parser.add_argument('--endpoint', required=True, help='Endpoint API (ex: /api/spampolicy/global)')
+    call_parser.add_argument('--token', help='Token Bearer (opcional si has fet login abans)')
+    call_parser.add_argument('--method', default='GET', choices=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], help='Mètode HTTP per a la crida (GET per defecte)')
+    call_parser.add_argument('--data', help='Dades a enviar en POST/PUT/PATCH (format text o JSON)')
     call_parser.add_argument('--cookies', default=DEFAULT_COOKIE_JAR, help='Fitxer cookies')
-    call_parser.add_argument('-k', '--insecure', action='store_true', help='Ignora errors SSL')
+    call_parser.add_argument('-k', '--insecure', action='store_true', help='Ignora errors SSL (com curl -k)')
     call_parser.set_defaults(func=call)
 
-    logout_parser = subparsers.add_parser('logout', help='Esborra el fitxer de cookies i token')
+    logout_parser = subparsers.add_parser('logout', help='Esborra el fitxer de cookies')
     logout_parser.add_argument('--cookies', default=DEFAULT_COOKIE_JAR, help='Fitxer cookies')
     logout_parser.set_defaults(func=logout)
 
     token_parser = subparsers.add_parser('token', help='Mostra el token desat')
+    token_parser.add_argument('--raw', action='store_true', help='Mostra només el token sense colors ni prefix')
     token_parser.set_defaults(func=show_token)
 
     args = parser.parse_args()
