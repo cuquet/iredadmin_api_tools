@@ -1,6 +1,6 @@
 # iRedAPI CLI `iredapi_manager.py`
 
-## Què fa?
+## 1. Descripció general
 
 `iredapi_manager.py` és una eina de línia de comandes (CLI) per interactuar amb l'API REST d’iRedAdmin. Facilita operacions com login, consultes d’usuaris i administració remota de comptes mitjançant crides HTTP. Està pensada per a administradors de sistemes que treballin amb iRedMail.
 
@@ -15,7 +15,7 @@
 - Usa fitxers per emmagatzemar cookies (`~/.iredapi_cookies.txt`) i token (`~/.iredapi_token`).
 - Les URLs, fitxers de cookies i paràmetres són configurables via arguments i variables d’entorn.
 
-## 🔧 Funcionalitats
+## 1. 🔧 Funcionalitats
 
 - Iniciar sessió (`login`) amb nom d’usuari i contrasenya.
 - Desa automàticament el token i les cookies.
@@ -32,7 +32,7 @@
   - `IREDAPI_INSECURE=1`: ignora errors SSL
   - `IREDAPI_DEBUG=1`: mostra missatges `Logger.debug()` per depuració
 
-## 📁 Fitxers utilitzats
+## 1. 📁 Fitxers utilitzats
 
 - `~/.iredapi_token`: token desat
 - `~/.iredapi_cookies.txt`: cookies de sessió
@@ -44,11 +44,30 @@
 $ ./iredapi_manager.py login -u admin@example.com
 Contrasenya: ********
 ```
-
 Sortida esperada: 
 
 ```bash
 ✅ Login correcte. Token guardat.
+```
+### 👤 Consultar sessió
+
+```bash
+$ ./iredapi_manager.py session
+```
+Sortida esperada: 
+
+```bash
+🚀 Cridant a l'API... | ✅ Cookies carregades: 🍪 
+{
+  "_success": True
+  "username": <USERNAME>,
+  "is_global_admin": True,
+  "is_domain_admin": False,
+  "is_mail_admin": False,
+  "is_user_admin": False,
+  "token_present": True,
+  "api_token": "SlfyCPAM...",
+}
 ```
 
 ### 📞 Fer una crida GET

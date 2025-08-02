@@ -195,6 +195,11 @@ class SessionManager:
             jar.set_cookie(c)
 
         jar.save(ignore_discard=True, ignore_expires=True)
+        for c in jar:
+            if c.domain:
+                Logger.debug(f"Cookie guardada: {c.name}={c.value} (domini: {c.domain})")
+            else:
+                Logger.debug(f"Cookie guardada: {c.name}={c.value} (sense domini)")
     
     def load_cookie(self):
         """Carrega i retorna un MozillaCookieJar si existeix."""
