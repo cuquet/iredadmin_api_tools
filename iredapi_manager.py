@@ -24,7 +24,7 @@ Pots passar la URL base via variable IREDAPI_URL o per l’argument --url (té p
 Opció -k o variable IREDAPI_INSECURE=1 per ignorar errors SSL (com curl -k).
 
 # Login (ignora SSL)
-python3 iredapi.py login --username postmaster@melindro.org --password <password> -k
+python3 iredapi.py login --username postmaster@melindro.org --password pwd -k
 
 # Crida a l'API amb cookies guardades
 python3 iredapi.py call --endpoint /api/spampolicy/global
@@ -34,6 +34,16 @@ python3 iredapi.py call --endpoint /api/spampolicy/global --token CfOM847tVQkSm-
 
 # Esborrar cookies
 python3 iredapi.py logout
+
+# Mostrar token
+$ python3 iredapi.py token
+🔑 Token actual: xQKa_TszBU...
+
+$ python3 iredapi.py token --raw
+xQKa_TszBU...
+
+$ python3 iredapi.py token 
+❌ No s'ha trobat cap token desat. Fes login primer.
 '''
 
 
@@ -168,8 +178,17 @@ def call(args):
     verify = not should_skip_ssl_verification(args)
 
     headers = {}
-    if args.token:
-        headers['Authorization'] = f"Bearer {args.token}"
+    token = args.token
+    if not token:
+        token_file = os.path.expanduser('~/.iredapi_token')
+        if os.path.exists(token_file):
+            with open(token_file) as f:
+                token = f.read().strip()
+    if token:
+        headers['Authorization'] = f"Bearer {token}"
+    else:
+        print(f"{AnsiColor.RED}❌ No s'ha trobat cap token. Fes login primer o usa --token.{AnsiColor.RESET}")
+        return
 
     spinner = Spinner("Cridant a l'API...")
     spinner.start()
@@ -186,6 +205,8 @@ def call(args):
     jp(resp.text)
 
 def logout(args):
+    """Esborra fitxers de sessió: cookies i token."""
+    # Esborra el fitxer de cookies
     try:
         os.remove(args.cookies)
         print(f"{AnsiColor.GREEN}✅ Fitxer de cookies '{args.cookies}' eliminat.{AnsiColor.RESET}")
@@ -193,6 +214,31 @@ def logout(args):
         print(f"ℹ️ Fitxer de cookies '{args.cookies}' no existeix.")
     except Exception as e:
         print(f"{AnsiColor.RED}❌ Error eliminant cookies: {e}{AnsiColor.RESET}")
+
+    # Esborra el fitxer de token
+    token_file = os.path.expanduser('~/.iredapi_token')
+    try:
+        os.remove(token_file)
+        print(f"{AnsiColor.GREEN}✅ Fitxer de token '{token_file}' eliminat.{AnsiColor.RESET}")
+    except FileNotFoundError:
+        print(f"ℹ️ Fitxer de token '{token_file}' no existeix.")
+    except Exception as e:
+        print(f"{AnsiColor.RED}❌ Error eliminant token: {e}{AnsiColor.RESET}")
+
+
+def show_token(args):
+    """Mostra el token d'autenticació desat, amb o sense format."""
+    token_file = os.path.expanduser('~/.iredapi_token')
+    if os.path.exists(token_file):
+        with open(token_file) as f:
+            token = f.read().strip()
+        if args.raw:
+            print(token)
+        else:
+            print(f"{AnsiColor.GREEN}🔑 Token actual:{AnsiColor.RESET} {token}")
+    else:
+        print(f"{AnsiColor.RED}❌ No s'ha trobat cap token desat. Fes login primer.{AnsiColor.RESET}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -222,7 +268,7 @@ def main():
     call_parser = subparsers.add_parser('call', help='Crida a un endpoint protegit')
     call_parser.add_argument('--url', default=DEFAULT_URL, help='URL base de l\'API')
     call_parser.add_argument('--endpoint', required=True, help='Endpoint API (ex: /api/spampolicy/global)')
-    call_parser.add_argument('--token', help='Token Bearer (si no vols usar cookies)')
+    call_parser.add_argument('--token', help='Token Bearer (opcional si has fet login abans)')
     call_parser.add_argument('--cookies', default=DEFAULT_COOKIE_JAR, help='Fitxer cookies')
     call_parser.add_argument('-k', '--insecure', action='store_true', help='Ignora errors SSL (com curl -k)')
     call_parser.set_defaults(func=call)
@@ -230,6 +276,10 @@ def main():
     logout_parser = subparsers.add_parser('logout', help='Esborra el fitxer de cookies')
     logout_parser.add_argument('--cookies', default=DEFAULT_COOKIE_JAR, help='Fitxer cookies')
     logout_parser.set_defaults(func=logout)
+
+    token_parser = subparsers.add_parser('token', help='Mostra el token desat')
+    token_parser.add_argument('--raw', action='store_true', help='Mostra només el token sense colors ni prefix')
+    token_parser.set_defaults(func=show_token)
 
     args = parser.parse_args()
     args.func(args)
