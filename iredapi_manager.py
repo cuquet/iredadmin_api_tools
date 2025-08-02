@@ -38,15 +38,7 @@ python3 iredapi.py call --method POST --endpoint /api/user --data '{"name":"Joan
 # Esborrar cookies
 python3 iredapi.py logout
 
-# Mostrar token
-$ python3 iredapi.py token
-🔑 Token actual: xQKa_TszBU...
 
-$ python3 iredapi.py token --raw
-xQKa_TszBU...
-
-$ python3 iredapi.py token 
-❌ No s'ha trobat cap token desat. Fes login primer.
 '''
 
 
@@ -164,10 +156,14 @@ def login(args):
         return
 
     session.cookies.save(ignore_discard=True, ignore_expires=True)
-    print(f"{AnsiColor.GREEN}✅ Login correcte. Token: {token[:10]}...{AnsiColor.RESET}")
     with open(os.path.expanduser('~/.iredapi_token'), 'w') as f:
         f.write(token)
-    jp(json_resp)
+    # 👇 Mostra resposta segons --raw
+    if args.raw:
+        print(json.dumps(json_resp, indent=2, ensure_ascii=False))
+    else:
+        print(f"{AnsiColor.GREEN}✅ Login correcte. Token: {token[:10]}...{AnsiColor.RESET}")
+        jp(json_resp)
 
 def call(args):
     session = get_session(args.cookies)
@@ -216,7 +212,10 @@ def call(args):
 
     print(f"{AnsiColor.GREEN}✅ Resposta de l'API:{AnsiColor.RESET}")
     if resp.text:
-        jp(resp.text)
+        if args.raw:
+            print(resp.text)
+        else:
+            jp(resp.text)
     else:
         print("(Sense contingut de resposta)")
 
@@ -266,9 +265,15 @@ def main():
             'La URL base per defecte és https://localhost/iredadmin però la pots canviar amb:\n'
             '  --url o la variable d\'entorn IREDAPI_URL\n'
             'Usa la subcomanda "jp" (integrada) per mostrar JSON bonic.\n'
+            'però si indiques --raw, el JSON es mostra en format normal (sense codi de color).'
+        ),
+        epilog=(
+            'ℹ️ Per a més ajuda, usa --help o ajuda subcomanda.\n'
+            'ℹ️ Per a més informació sobre les API, visita: https://iredmail.org/api.html\n'
         ),
         formatter_class=argparse.RawTextHelpFormatter
     )
+    parser.add_argument('-r', '--raw', action='store_true', help='Mostra les respostes en cru (sense colors ni format)')
     parser.set_defaults(func=lambda args: parser.print_help())
 
     subparsers = parser.add_subparsers(title='Subcomandes', dest='command')
