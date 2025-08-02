@@ -37,6 +37,7 @@ class AnsiColor:
     RESET = '\033[0m'
 
 class Logger:
+    DEBUG_ENABLED = os.getenv('IREDAPI_DEBUG', '0') == '1'
     @staticmethod
     def print_msg(msg, color='', symbol='', prefix='', raw=False, err=False):
         """
@@ -80,7 +81,9 @@ class Logger:
     @staticmethod
     def debug(msg, raw=False):
         """Missatge de depuració en groc amb bug 🐛 i prefix [DEBUG]."""
-        Logger.print_msg(msg, AnsiColor.YELLOW, '\U0001F41B', '[DEBUG]', raw=raw)
+        """Missatge de depuració només si DEBUG_ENABLED és True."""
+        if Logger.DEBUG_ENABLED:
+            Logger.print_msg(msg, AnsiColor.YELLOW, '\U0001F41B', '[DEBUG]', raw=raw)
 
 def handle_exception(exc, raw=False, msg="Error inesperat:"):
     error = f"{msg} ({type(exc).__name__}: {exc})"
@@ -226,6 +229,16 @@ class SessionManager:
     def token_exists(self):
         return os.path.exists(self.token_file)
 
+def should_skip_ssl_verification(args):
+    # Ignora errors SSL si --insecure o variable d'entorn IREDAPI_INSECURE=1
+    return args.insecure or os.getenv('IREDAPI_INSECURE') == '1'
+
+def print_json(data, raw=False):
+    if raw:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+    else:
+        json_pretty(data, raw=False)
+
 def cmd_show_token(args):
     cookies_file = args.cookies
     raw = getattr(args, 'raw', False)
@@ -234,9 +247,9 @@ def cmd_show_token(args):
         with open(TOKEN_FILE) as f:
             token = f.read().strip()
         if raw:
-            print(json.dumps({'_success': True, '_data': token}))
+            print_json({'_success': True, '_data': token})
         else:
-            print(f"{AnsiColor.GREEN}🔑 Token actual:{AnsiColor.RESET} {token}")
+            Logger.success(f"Token actual 🔑 : {token}")
         return
 
     if os.path.exists(cookies_file):
@@ -277,10 +290,6 @@ def cmd_show_token(args):
             print(json.dumps({'_success': False, '_msg': msg}))
         else:
             print(f"{AnsiColor.RED}❌ {msg}{AnsiColor.RESET}")
-            
-def should_skip_ssl_verification(args):
-    # Ignora errors SSL si --insecure o variable d'entorn IREDAPI_INSECURE=1
-    return args.insecure or os.getenv('IREDAPI_INSECURE') == '1'
 
 def cmd_logout(args, session_mgr):
     """Esborra fitxers de sessió: cookies i token."""
@@ -428,11 +437,12 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
     Logger.debug(f"Cridant amb URL: {url} | METHOD: {method}")
     try:
         resp = requests.request(method, url, headers=headers, data=data_to_send, verify=verify, cookies=jar, allow_redirects=False)
-    except Exception as e:
+        resp.raise_for_status()  # ❗️ Proposa excepció si status >= 400
+    except requests.exceptions.RequestException as e:
         if spinner:
             spinner.stop()
         if args.raw:
-            print(json.dumps({'_success': False, '_msg': str(e)}))
+            print_json({'_success': False, '_msg': str(e)}, raw=True)
         else:
             handle_exception(e, raw=False, msg="Error durant la crida HTTP:")
         return None
@@ -445,20 +455,14 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
     try:
         content = resp.json()
     except ValueError:
-        if args.raw:
-            print(json.dumps({'_success': False, '_msg': 'Resposta no JSON'}))
-        else:
-            Logger.warning(resp.text)
+        Logger.warning("Resposta no és JSON vàlid.")
         return None
     
     
     if internal:
         return resp # retorna tot l'objecte Response
 
-    if args.raw:
-        print(json.dumps(content))
-    else:
-        json_pretty(content, raw=False)
+    print_json(content, raw=args.raw)
 
 def cmd_session(args, session_mgr):
     # Carregar el token desat
@@ -542,6 +546,9 @@ def main():
     # RAW mode via variable d'entorn
     if RAW_MODE:
         args.raw = True
+    
+    if Logger.DEBUG_ENABLED:
+        Logger.info("DEBUG mode actiu 🐛")
 
     session_mgr = SessionManager()
     if args.command in ('login', 'call', 'logout', 'session'):
