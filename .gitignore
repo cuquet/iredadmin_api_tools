@@ -1,0 +1,43 @@
+# Python bytecode / compilats
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Fitxers de logs o sortida temporal
+*.log
+*.out
+*.tmp
+
+# Fitxers de configuració de l’entorn local
+.env
+.venv/
+venv/
+env/
+*.env
+
+# Fitxers de sistema o macOS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Fitxers de sessió/autenticació
+*.token
+*.cookies.txt
+iredapi_token
+iredapi_cookies.txt
+~/.iredapi_token
+~/.iredapi_cookies.txt
+
+# Versions antigues (ja guardades a l'historial de Git)
+iredapi_managerv*.py
+
+# Fitxers de backup temporals
+*~
+*.bak
+*.swp
+
+# scripts d'ús local
+generate_changelog.sh
+init_git_history.sh
+reorder_commits.sh
