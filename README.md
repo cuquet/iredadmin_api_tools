@@ -59,14 +59,16 @@ Sortida esperada:
 ```bash
 🚀 Cridant a l'API... | ✅ Cookies carregades: 🍪 
 {
-  "_success": True
-  "username": <USERNAME>,
-  "is_global_admin": True,
-  "is_domain_admin": False,
-  "is_mail_admin": False,
-  "is_user_admin": False,
-  "token_present": True,
-  "api_token": "SlfyCPAM...",
+  "_success": True,
+  "_data": {
+      "username": <USERNAME>,
+      "is_global_admin": True,
+      "is_domain_admin": False,
+      "is_mail_admin": False,
+      "is_user_admin": False,
+      "token_present": True,
+      "api_token": "SlfyCPAM...",
+  }
 }
 ```
 

@@ -25,6 +25,9 @@ TOKEN_FILE = os.path.expanduser('~/.iredapi_token')
 COOKIE_FILE = os.path.expanduser('~/.iredapi_cookies.txt')
 # Detectar RAW mode via variable d'entorn
 RAW_MODE = os.getenv('IREDAPI_RAW', '0') == '1'
+MASK_SENSITIVE_DATA = os.getenv('IREDAPI_MASK_SENSITIVE', '1') != '1'
+# Nota: != '1' perquè quan és '1', no volem fer masking si també s'afegeix --show-secrets.
+SENSITIVE_KEYS = {'password', 'api_token', 'session_id', 'token'}
 
 
 import sys
@@ -102,7 +105,10 @@ def json_pretty_color(data, indent=0):
             items = []
             for k, v in obj.items():
                 colored_key = f'{AnsiColor.YELLOW}"{k}"{AnsiColor.RESET}'
-                colored_val = colorize(v, level + 1)
+                if MASK_SENSITIVE_DATA and k in SENSITIVE_KEYS:
+                    colored_val = f'{AnsiColor.RED}"***"{AnsiColor.RESET}'
+                else:
+                    colored_val = colorize(v, level + 1)
                 items.append(f'{pad_next}{colored_key}: {colored_val}')
             return '{\n' + ',\n'.join(items) + f'\n{pad}' + '}'
         elif isinstance(obj, list):
@@ -238,7 +244,7 @@ def should_skip_ssl_verification(args):
     # Ignora errors SSL si --insecure o variable d'entorn IREDAPI_INSECURE=1
     return args.insecure or os.getenv('IREDAPI_INSECURE') == '1'
 
-def print_json(data, raw=False):
+def print_json(data, raw=True):
     if raw:
         print(json.dumps(data, indent=2, ensure_ascii=False))
     else:
@@ -263,7 +269,7 @@ def cmd_show_token(args):
             session_cookies.load(ignore_discard=True, ignore_expires=True)
         except Exception as e:
             if raw:
-                print(json.dumps({'_success': False, '_msg': f"Error llegint cookies: {e}"}))
+                print_json({'_success': False, '_msg': f"Error llegint cookies: {e}"})
             else:
                 print(f"{AnsiColor.RED}⚠️ Error llegint cookies: {e}{AnsiColor.RESET}")
             return
@@ -275,24 +281,24 @@ def cmd_show_token(args):
 
             if token:
                 if raw:
-                    print(json.dumps({'_success': True, '_data': token}))
+                    print_json({'_success': True, '_data': token})
                 else:
                     print(f"{AnsiColor.GREEN}🔑 Token de sessió:{AnsiColor.RESET} {token}")
             else:
                 msg = "Cap token trobat a la sessió."
                 if raw:
-                    print(json.dumps({'_success': False, '_msg': msg}))
+                    print_json({'_success': False, '_msg': msg})
                 else:
                     print(f"{AnsiColor.RED}❌ {msg}{AnsiColor.RESET}")
         except Exception as e:
             if raw:
-                print(json.dumps({'_success': False, '_msg': f"Error llegint token de sessió: {e}"}))
+                print_json({'_success': False, '_msg': f"Error llegint token de sessió: {e}"})
             else:
                 print(f"{AnsiColor.RED}❌ Error llegint token de sessió: {e}{AnsiColor.RESET}")
     else:
         msg = "No s'ha trobat cap token desat. Fes login primer."
         if raw:
-            print(json.dumps({'_success': False, '_msg': msg}))
+            print_json({'_success': False, '_msg': msg})
         else:
             print(f"{AnsiColor.RED}❌ {msg}{AnsiColor.RESET}")
 
@@ -328,9 +334,9 @@ def cmd_logout(args, session_mgr):
     # Sortida en format RAW (JSON)
     if args.raw:
         if success:
-            print(json.dumps({'_success': True}))
+            print_json({'_success': True})
         else:
-            print(json.dumps({'_success': False, '_msg': '; '.join(errors) if errors else ''}))
+            print_json({'_success': False, '_msg': '; '.join(errors) if errors else ''})
     else:
         if success:
             Logger.success(f" 👋 Sessió tancada.")
@@ -354,7 +360,7 @@ def cmd_login(args, session_mgr):
     except Exception as e:
         spinner.stop()
         if args.raw:
-            print(json.dumps({'_success': False, '_msg': str(e)}))
+            print_json({'_success': False, '_msg': str(e)})
         else:
             handle_exception(e, raw=False, msg="Error durant l'autenticació")
         return
@@ -367,22 +373,23 @@ def cmd_login(args, session_mgr):
     
     #print(f"Resposta API: {resp}")
     payload = resp.json()
-    if payload.get('_success') and payload.get('api_token'):
-        session_mgr.save_token(payload['api_token'])
-        msg= "Login correcte. Token guardat."
+    #if payload.get('_success') and payload.get('_data', {}).get('api_token'):
+    if payload.get('_success') and '_data' in payload and 'api_token' in payload['_data']:
+        api_token = payload['_data']['api_token']
+        session_mgr.save_token(api_token)
         
         session_mgr.save_cookie(resp, domain=args.url.split('//')[-1].split('/')[0])  # extreu domini
         
         if args.raw:
-            print(json.dumps({'_success': True, '_msg': msg}))
+            print_json({'_success': True, '_msg': payload['_msg'], '_data': payload['_data']})
         else:
+            msg= "Login correcte. Sessió i Token guardats."
             Logger.success(msg)
         return
     else:
-        msg= f"Error d'autenticació: {resp.get('_msg')}"
-        
+        msg= f"Error d'autenticació: {payload.get('_msg', 'Error desconegut')}"
         if args.raw:
-            print(json.dumps({'_success': False, '_msg': msg}))
+            print_json({'_success': False, '_msg': msg})
         else:
             Logger.error(msg)
     
@@ -396,7 +403,7 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
         if not token:
             msg = "No hi ha cap token. Cal fer login primer."
             if args.raw:
-                print(json.dumps({'_success': False, '_msg': msg}))
+                print_json({'_success': False, '_msg': msg})
             else:
                 Logger.error(msg)
             return None
@@ -447,12 +454,13 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
         if spinner:
             spinner.stop()
         if args.raw:
-            print_json({'_success': False, '_msg': str(e)}, raw=True)
+            print_json({'_success': False, '_msg': str(e)})
         else:
             handle_exception(e, raw=False, msg="Error durant la crida HTTP:")
         return None
     finally:
         if spinner:
+            time.sleep(3)  # 👈 força un delay per mostrar el spinner
             spinner.stop()
     Logger.debug(f"Tipus de resp: {type(resp)}")
     Logger.debug(f"Contingut de resp: {resp}")
@@ -507,6 +515,7 @@ def main():
     parser.add_argument('-r', '--raw', action='store_true', help='Sortida RAW sense colors')
     parser.add_argument('-t', '--token', help='Token d\'autenticació personalitzat')
     parser.add_argument('--cookies', default=COOKIE_FILE, help='Fitxer de cookies')
+    parser.add_argument('--show-secrets', action='store_true', help='Mostra valors sensibles com API token, contrasenyes, etc.')
     parser.set_defaults(func=lambda args: parser.print_help())
   
     subparsers = parser.add_subparsers(title='Subcomandes',dest='command')
@@ -551,6 +560,10 @@ def main():
     # RAW mode via variable d'entorn
     if RAW_MODE:
         args.raw = True
+    
+    global MASK_SENSITIVE_DATA
+    if args.show_secrets:
+        MASK_SENSITIVE_DATA = False
     
     if Logger.DEBUG_ENABLED:
         Logger.info("DEBUG mode actiu 🐛")
