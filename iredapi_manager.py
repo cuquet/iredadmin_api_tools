@@ -30,8 +30,6 @@ MASK_SENSITIVE_DATA = os.getenv('IREDAPI_MASK_SENSITIVE', '1') != '1'
 SENSITIVE_KEYS = {'password', 'api_token', 'session_id', 'token'}
 
 
-import sys
-
 class AnsiColor:
     RED = '\033[31m'
     GREEN = '\033[32m'
@@ -128,26 +126,19 @@ def json_pretty_color(data, indent=0):
     return colorize(data, indent)
 
 def json_pretty(data, raw=False):
-    if raw:
-        if isinstance(data, str):
-            try:
-                obj = json.loads(data)
-            except Exception:
-                print(data)
-                return
-        else:
-            obj = data
-        print(json.dumps(obj, indent=2, ensure_ascii=False))
-        return
-
     try:
-        if isinstance(data, str):
-            data = json.loads(data)
+        obj = json.loads(data) if isinstance(data, str) else data
     except Exception:
         print(data)
         return
 
-    print(json_pretty_color(data))
+    if raw:
+        print(json.dumps(obj, indent=2, ensure_ascii=False))
+    else:
+        print(json_pretty_color(obj))
+
+def print_json(data, raw=True):
+    json_pretty(data, raw=raw)
 
 class Spinner:
     def __init__(self, message="Carregant...", raw=False):
@@ -174,6 +165,9 @@ class Spinner:
         self.stop_running = True
         if self.thread:
             self.thread.join()
+        # Netegem línia i afegim un salt de línia
+        sys.stdout.write("\r" + " " * (len(self.message) + 2) + "\r\n")
+        sys.stdout.flush()
     
     def _spin(self):
         spinner_chars = ['|', '/', '-', '\\']
@@ -244,12 +238,6 @@ def should_skip_ssl_verification(args):
     # Ignora errors SSL si --insecure o variable d'entorn IREDAPI_INSECURE=1
     return args.insecure or os.getenv('IREDAPI_INSECURE') == '1'
 
-def print_json(data, raw=True):
-    if raw:
-        print(json.dumps(data, indent=2, ensure_ascii=False))
-    else:
-        json_pretty(data, raw=False)
-
 def cmd_show_token(args):
     cookies_file = args.cookies
     raw = getattr(args, 'raw', False)
@@ -314,7 +302,7 @@ def cmd_logout(args, session_mgr):
             Logger.success(f"Fitxer de cookies '{args.cookies}' eliminat.")
     except FileNotFoundError:
         if not args.raw:
-            print(f"ℹ️ Fitxer de cookies '{args.cookies}' no existeix.")
+            Logger.warning(f"Fitxer de cookies '{args.cookies}' no existeix.")
     except Exception as e:
         success = False
         errors.append(f"Error eliminant cookies: {e}")
@@ -433,16 +421,16 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
         method = args.method.upper()
 
     if not internal:
-        spinner = Spinner("🚀 Cridant a l'API...", raw=args.raw)
-        spinner.start()
         jar = session_mgr.load_cookie()
         if not args.raw:
             if jar and len(jar):
-                Logger.success("Cookies carregades: 🍪 ")
+                Logger.success("Cookies 🍪 carregades:")
                 # for c in jar:
                 #     Logger.debug(f"  {c.name}={c.value} (domini: {c.domain})")
             else:
                 Logger.error("No s'han carregat cookies.")
+        spinner = Spinner("🚀 Cridant a l'API...", raw=args.raw)
+        spinner.start()
     else:
         spinner = None
         jar = None

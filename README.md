@@ -30,7 +30,16 @@
   - `IREDAPI_URL`: URL base de l’API (per defecte: `https://localhost/iredadmin/api`)
   - `IREDAPI_RAW=1`: activa mode RAW per defecte
   - `IREDAPI_INSECURE=1`: ignora errors SSL
+  - `IREDAPI_MASK_SENSITIVE=0`: Mostra claus sensibles (com api_token, password, etc.)
   - `IREDAPI_DEBUG=1`: mostra missatges `Logger.debug()` per depuració
+   
+| Cas                    | `MASK_SENSITIVE_DATA` | `--show-secrets` | Resultat           |
+| ---------------------- | --------------------- | ---------------- | ------------------ |
+| cap dels dos           | True (default)        | False            | S'amaguen secrets  |
+| només `--show-secrets` | True                  | ✅ True          | Es mostren secrets |
+| només var d'entorn `IREDAPI_MASK_SENSITIVE=1` | False                 | False            | Es mostren secrets |
+| tots dos               | False                 | ✅ True          | Es mostren secrets |
+
 
 ## 1. 📁 Fitxers utilitzats
 
@@ -39,7 +48,7 @@
 
 ## 🧪 Exemples d’ús
 
-### 🔐 Iniciar sessió
+### 🔑 Iniciar sessió
 ```bash
 $ ./iredapi_manager.py login -u admin@example.com
 Contrasenya: ********
@@ -145,6 +154,10 @@ export IREDAPI_INSECURE=1
 
 # 🐛 Activa missatges de depuració (Logger.debug)
 export IREDAPI_DEBUG=1
+
+# 🔐 mostra els valors sensibles:
+# SENSITIVE_KEYS = {'password', 'api_token', 'session_id', 'token'}
+export IREDAPI_MASK_SENSITIVE=0
 ```
 
 #### 🚫 Desactivar (netejar variables)
@@ -152,6 +165,7 @@ export IREDAPI_DEBUG=1
 unset IREDAPI_RAW        # Torna a activar colors en la sortida
 unset IREDAPI_INSECURE   # Torna a validar els certificats SSL
 unset IREDAPI_DEBUG      # Amaga missatges de depuració
+unset IREDAPI_MASK_SENSITIVE # Amaga dades sensibles 
 ```
 
 #### 🧑‍💻 Exemple d’ús combinat amb crida
@@ -160,6 +174,7 @@ $ export IREDAPI_URL="https://mail.example.com/iredadmin/api"
 $ export IREDAPI_RAW=1
 $ export IREDAPI_INSECURE=1
 $ export IREDAPI_DEBUG=1
+$ export IREDAPI_MASK_SENSITIVE=0
 
 $ ./iredapi_manager.py call -e /user/example@example.com -m GET
 ```
@@ -229,6 +244,9 @@ IREDAPI_INSECURE=1
 
 # Mostra missatges de depuració detallats (Logger.debug)
 IREDAPI_DEBUG=1
+
+# Mostra dades sensibles definides a SENSITIVE_KEYS = {'password', 'api_token', 'session_id', 'token'}
+IREDAPI_MASK_SENSITIVE=0
 ```
 
 ### ▶️ Com fer-lo servir
@@ -258,7 +276,7 @@ $ unset IREDAPI_DEBUG
 ### ℹ️ Notes
 Les variables de `.env` tenen efecte mentre la terminal estigui oberta o fins que facis unset.
 
-Pots afegir source `~/.iredapi.env` al teu `~/.bashrc`, `~/.zshrc` o `~/.profile` si vols que es carreguin sempre automàticament.
+Pots afegir `source ~/.iredapi.env` al teu `~/.bashrc`, `~/.zshrc` o `~/.profile` si vols que es carreguin sempre automàticament.
 
 
 ## 📄 Llicència
