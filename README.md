@@ -76,10 +76,11 @@ Sortida esperada:
       "is_mail_admin": False,
       "is_user_admin": False,
       "token_present": True,
-      "api_token": "SlfyCPAM...",
+      "api_token": "***",
   }
 }
 ```
+Fixa't que mostra `***` en lloc de les dades sensibles. Per veure-les necessitaràs activar la variable d'entorn, o bé passar l'argument `./iredapi_manager.py --show-secrets session`
 
 ### 📞 Fer una crida GET
 ```bash

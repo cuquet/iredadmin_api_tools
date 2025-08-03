@@ -25,8 +25,8 @@ TOKEN_FILE = os.path.expanduser('~/.iredapi_token')
 COOKIE_FILE = os.path.expanduser('~/.iredapi_cookies.txt')
 # Detectar RAW mode via variable d'entorn
 RAW_MODE = os.getenv('IREDAPI_RAW', '0') == '1'
-MASK_SENSITIVE_DATA = os.getenv('IREDAPI_MASK_SENSITIVE', '1') != '1'
-# Nota: != '1' perquè quan és '1', no volem fer masking si també s'afegeix --show-secrets.
+MASK_SENSITIVE_DATA = os.getenv('IREDAPI_MASK_SENSITIVE', '1') != '0'  # per defecte, amaga dades sensibles
+# Nota: != '0' perquè quan és '0', no volem fer masking si també s'afegeix --show-secrets.
 SENSITIVE_KEYS = {'password', 'api_token', 'session_id', 'token'}
 
 
@@ -40,7 +40,7 @@ class AnsiColor:
 class Logger:
     DEBUG_ENABLED = os.getenv('IREDAPI_DEBUG', '0') == '1'
     @staticmethod
-    def print_msg(msg, color='', symbol='', prefix='', raw=False, err=False):
+    def print_msg(msg, color='', symbol='', prefix='', raw=False, err=False, end='\n', flush=True):
         """
         Imprimeix un missatge amb format opcional de color, símbol i prefix.
 
@@ -57,34 +57,34 @@ class Logger:
         else:
             parts = [part for part in [color, symbol, prefix, msg] if part]
             output = ' '.join(parts) + AnsiColor.RESET
-        print(output, file=sys.stderr if err else sys.stdout)
+        print(output, file=sys.stderr if err else sys.stdout, end=end, flush=flush)
 
     @staticmethod
-    def error(msg, raw=False):
+    def error(msg, raw=False, end='\n', flush=True):
         """Missatge d'error en vermell amb creu (stderr)."""
-        Logger.print_msg(msg, AnsiColor.RED, '\u274c', raw=raw, err=True)
+        Logger.print_msg(msg, AnsiColor.RED, '\u274c', raw=raw, err=True, end=end, flush=flush)
 
     @staticmethod
-    def success(msg, raw=False):
+    def success(msg, raw=False, end='\n', flush=True):
         """Missatge d'èxit en verd amb check."""
-        Logger.print_msg(msg, AnsiColor.GREEN, '\u2705', raw=raw)
+        Logger.print_msg(msg, AnsiColor.GREEN, '\u2705', raw=raw, end=end, flush=flush)
 
     @staticmethod
-    def info(msg, raw=False):
+    def info(msg, raw=False, end='\n', flush=True):
         """Missatge informatiu en cian amb ℹ️ i prefix [INFO]."""
-        Logger.print_msg(msg, AnsiColor.CYAN, '\u2139\uFE0F', '[INFO]', raw=raw)
+        Logger.print_msg(msg, AnsiColor.CYAN, '\u2139\uFE0F', '[INFO]', raw=raw, end=end, flush=flush)
 
     @staticmethod
-    def warning(msg, raw=False):
+    def warning(msg, raw=False, end='\n', flush=True):
         """Missatge d'advertència en groc amb ⚠️ i prefix [WARNING] (stderr)."""
-        Logger.print_msg(msg, AnsiColor.YELLOW, '\u26A0\uFE0F', '[WARNING]', raw=raw, err=True)
+        Logger.print_msg(msg, AnsiColor.YELLOW, '\u26A0\uFE0F', '[WARNING]', raw=raw, err=True, end=end, flush=flush)
 
     @staticmethod
-    def debug(msg, raw=False):
+    def debug(msg, raw=False, end='\n', flush=True):
         """Missatge de depuració en groc amb bug 🐛 i prefix [DEBUG]."""
         """Missatge de depuració només si DEBUG_ENABLED és True."""
         if Logger.DEBUG_ENABLED:
-            Logger.print_msg(msg, AnsiColor.YELLOW, '\U0001F41B', '[DEBUG]', raw=raw)
+            Logger.print_msg(msg, AnsiColor.YELLOW, '\U0001F41B', '[DEBUG]', raw=raw, end=end, flush=flush)
 
 def handle_exception(exc, raw=False, msg="Error inesperat:"):
     error = f"{msg} ({type(exc).__name__}: {exc})"
@@ -141,20 +141,31 @@ def print_json(data, raw=True):
     json_pretty(data, raw=raw)
 
 class Spinner:
-    def __init__(self, message="Carregant...", raw=False):
+    # SPINNER_START_ICON = "🏎️" # "🚀" "✈️" "🚗"
+    # SPINNER_END_ICON = "🏁" 🛬
+    def __init__(self, message="Loading...", raw=False, done_message=None):
         self.raw = raw
         self.stop_running = False
         self.thread = None
-
-        max_msg_len = 50  # límit fix
-        if len(message) > max_msg_len:
-            self.message = message[:max_msg_len - 3] + '...'
+        self.max_msg_len = 80  # límit fix
+        prefix = "🚗 "
+        if len(message) > self.max_msg_len - len(prefix):
+            self.message = prefix + message[:self.max_msg_len - len(prefix) - 3] + '...'
         else:
-            self.message = message
+            self.message = prefix + message
+        self.done_message = done_message or "🏁 Fet!"
 
     def start(self):
         if self.raw:
             return
+        
+        # Esborrem línia prèvia
+        sys.stdout.write("\r" + " " * self.max_msg_len + "\r")
+        sys.stdout.flush()
+        
+        # Afegim línia en blanc
+        print()
+        
         self.stop_running = False
         self.thread = threading.Thread(target=self._spin)
         self.thread.start()
@@ -165,9 +176,11 @@ class Spinner:
         self.stop_running = True
         if self.thread:
             self.thread.join()
-        # Netegem línia i afegim un salt de línia
-        sys.stdout.write("\r" + " " * (len(self.message) + 2) + "\r\n")
-        sys.stdout.flush()
+        
+        # Substituïm línia de spinner pel missatge final
+        sys.stdout.write("\r" + " " * self.max_msg_len + "\r")
+        print(self.done_message)
+        print() # línia en blanc després
     
     def _spin(self):
         spinner_chars = ['|', '/', '-', '\\']
@@ -177,8 +190,6 @@ class Spinner:
             sys.stdout.flush()
             time.sleep(0.1)
             idx += 1
-        sys.stdout.write("\r" + " " * (len(self.message) + 2) + "\r")
-        sys.stdout.flush()
 
 class SessionManager:
     def __init__(self, token_file=TOKEN_FILE , cookie_file=COOKIE_FILE):
@@ -424,12 +435,13 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
         jar = session_mgr.load_cookie()
         if not args.raw:
             if jar and len(jar):
-                Logger.success("Cookies 🍪 carregades:")
-                # for c in jar:
-                #     Logger.debug(f"  {c.name}={c.value} (domini: {c.domain})")
+                Logger.success("Cookies carregades: 🍪", end='', flush=True)
+                for c in jar:
+                    Logger.debug(f"  {c.name}={c.value} (domini: {c.domain})")
+                time.sleep(2)  # 👈 força un delay per mostrar el spinner
             else:
                 Logger.error("No s'han carregat cookies.")
-        spinner = Spinner("🚀 Cridant a l'API...", raw=args.raw)
+        spinner = Spinner("Cridant a l'API...", raw=args.raw)
         spinner.start()
     else:
         spinner = None
@@ -448,11 +460,11 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
         return None
     finally:
         if spinner:
-            time.sleep(3)  # 👈 força un delay per mostrar el spinner
+            time.sleep(2)  # 👈 força un delay per mostrar el spinner
             spinner.stop()
     Logger.debug(f"Tipus de resp: {type(resp)}")
     Logger.debug(f"Contingut de resp: {resp}")
-    Logger.debug(f"Contingut de resp: {resp}")
+    Logger.debug(f"Status code: {resp.status_code}")
     try:
         content = resp.json()
     except ValueError:
