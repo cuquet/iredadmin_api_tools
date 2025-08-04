@@ -11,14 +11,15 @@ import requests
 
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-import warnings
-from urllib3.exceptions import InsecureRequestWarning, NotOpenSSLWarning
-# Silenciar warnings d'InsecureRequestWarning (HTTPS sense verificació)
-warnings.filterwarnings("ignore", category=InsecureRequestWarning)
-# Silenciar el NotOpenSSLWarning
-warnings.filterwarnings("ignore", category=NotOpenSSLWarning)
+# import warnings
+# from urllib3.exceptions import InsecureRequestWarning, NotOpenSSLWarning
+# # Silenciar warnings d'InsecureRequestWarning (HTTPS sense verificació)
+# warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+# # Silenciar el NotOpenSSLWarning
+# warnings.filterwarnings("ignore", category=NotOpenSSLWarning)
 
 from http.cookiejar import MozillaCookieJar
+from collections import OrderedDict
 
 API_BASE = os.getenv('IREDAPI_URL', 'https://localhost/iredadmin/api')
 TOKEN_FILE = os.path.expanduser('~/.iredapi_token')
@@ -31,7 +32,7 @@ SENSITIVE_KEYS = {'password', 'api_token', 'session_id', 'token'}
 
 
 class AnsiColor:
-    RED = '\033[31m'
+    RED = '\033[38;2;220;100;100m'
     GREEN = '\033[32m'
     CYAN = '\033[36m'
     YELLOW = '\033[33m'
@@ -91,58 +92,89 @@ def handle_exception(exc, raw=False, msg="Error inesperat:"):
     output = error if raw else f"{AnsiColor.RED}\u274c {error}{AnsiColor.RESET}"
     print(output)
 
-def json_pretty_color(data, indent=0):
-    INDENT_STR = "  "
-    def colorize(obj, level):
-        pad = INDENT_STR * level
-        pad_next = INDENT_STR * (level + 1)
-        
-        if isinstance(obj, dict):
-            if not obj:
-                return '{}'
-            items = []
-            for k, v in obj.items():
-                colored_key = f'{AnsiColor.YELLOW}"{k}"{AnsiColor.RESET}'
-                if MASK_SENSITIVE_DATA and k in SENSITIVE_KEYS:
-                    colored_val = f'{AnsiColor.RED}"***"{AnsiColor.RESET}'
-                else:
-                    colored_val = colorize(v, level + 1)
-                items.append(f'{pad_next}{colored_key}: {colored_val}')
-            return '{\n' + ',\n'.join(items) + f'\n{pad}' + '}'
-        elif isinstance(obj, list):
-            if not obj:
-                return '[]'
-            items = [colorize(i, level + 1) for i in obj]
-            return '[\n' + ',\n'.join(f'{pad_next}{item}' for item in items) + f'\n{pad}]'
-        elif isinstance(obj, str):
-            return f'{AnsiColor.GREEN}"{obj}"{AnsiColor.RESET}'
-        elif isinstance(obj, bool):
-            return f'{AnsiColor.CYAN}{obj}{AnsiColor.RESET}'
-        elif obj is None:
-            return f'{AnsiColor.RED}null{AnsiColor.RESET}'
+class JsonFormatter:
+    def __init__(self, raw=False):
+        self.raw = raw
+
+    def colorize(self, obj, indent=0):
+        INDENT_STR = "  "
+        def _colorize(obj, level):
+            pad = INDENT_STR * level
+            pad_next = INDENT_STR * (level + 1)
+
+            if isinstance(obj, dict):
+                if not obj:
+                    return '{}'
+                items = []
+                for k, v in obj.items():
+                    colored_key = f'{AnsiColor.YELLOW}"{k}"{AnsiColor.RESET}'
+                    if MASK_SENSITIVE_DATA and k in SENSITIVE_KEYS:
+                        colored_val = f'{AnsiColor.RED}"***"{AnsiColor.RESET}'
+                    else:
+                        colored_val = _colorize(v, level + 1)
+                    items.append(f'{pad_next}{colored_key}: {colored_val}')
+                return '{\n' + ',\n'.join(items) + f'\n{pad}' + '}'
+            elif isinstance(obj, list):
+                if not obj:
+                    return '[]'
+                items = [_colorize(i, level + 1) for i in obj]
+                return '[\n' + ',\n'.join(f'{pad_next}{item}' for item in items) + f'\n{pad}]'
+            elif isinstance(obj, str):
+                return f'{AnsiColor.GREEN}"{obj}"{AnsiColor.RESET}'
+            elif isinstance(obj, bool):
+                return f'{AnsiColor.CYAN}{obj}{AnsiColor.RESET}'
+            elif obj is None:
+                return f'{AnsiColor.RED}null{AnsiColor.RESET}'
+            else:
+                return f'{AnsiColor.CYAN}{obj}{AnsiColor.RESET}'
+
+        return _colorize(obj, indent)
+    
+    def format(self, result):
+        """
+        Processa tuples o dicts per mostrar-los com JSON formatat,
+        amb o sense colors, i sense claus buides.
+        """
+        try:
+            if isinstance(result, tuple):
+                success, *rest = result
+                d = OrderedDict({'_success': success})
+                if rest:
+                    extra = rest[0]
+                    if isinstance(extra, dict):
+                        d['_msg'] = extra.get('_msg', d.get('_msg'))
+                        if '_data' in extra and extra['_data'] is not None:
+                            d['_data'] = extra['_data']
+                    elif isinstance(extra, str):
+                            d['_msg'] = extra
+            elif isinstance(result, dict):
+                # Construïm un diccionari ordenat amb només les claus rellevants i en l'ordre desitjat
+                d = OrderedDict()
+                success = result.get('_success', True)
+                d['_success'] = success
+                if '_msg' in result:
+                        d['_msg'] = result['_msg']
+                if '_data' in result:
+                    d['_data'] = result['_data']
+            else:
+                d = OrderedDict({'_success': False, '_msg': 'Format de dades no suportat'})
+                Logger.debug(f"JsonFormatter.format: format no suportat: {type(result)} -> {repr(result)}")
+        except Exception as e:
+            Logger.debug(f"Error processant dades: {type(e)} -> {e}")    
+            d = OrderedDict({'_success': False, '_msg': f'Error processant dades: {str(e)}'})
+
+        return d
+    
+    def show(self, result):
+        data = self.format(result)
+        if self.raw:
+            print(json.dumps(data, indent=2, ensure_ascii=False))
         else:
-            return f'{AnsiColor.CYAN}{obj}{AnsiColor.RESET}'
-
-    return colorize(data, indent)
-
-def json_pretty(data, raw=False):
-    try:
-        obj = json.loads(data) if isinstance(data, str) else data
-    except Exception:
-        print(data)
-        return
-
-    if raw:
-        print(json.dumps(obj, indent=2, ensure_ascii=False))
-    else:
-        print(json_pretty_color(obj))
-
-def print_json(data, raw=True):
-    json_pretty(data, raw=raw)
+            print(self.colorize(data))
 
 class Spinner:
     # SPINNER_START_ICON = "🏎️" # "🚀" "✈️" "🚗"
-    # SPINNER_END_ICON = "🏁" 🛬
+    # SPINNER_END_ICON = "🏁" 🛬 🎯
     def __init__(self, message="Loading...", raw=False, done_message=None):
         self.raw = raw
         self.stop_running = False
@@ -257,7 +289,7 @@ def cmd_show_token(args):
         with open(TOKEN_FILE) as f:
             token = f.read().strip()
         if raw:
-            print_json({'_success': True, '_data': token})
+            JsonFormatter(raw=raw).show((True, {'_data': token}))
         else:
             Logger.success(f"Token actual 🔑 : {token}")
         return
@@ -268,9 +300,9 @@ def cmd_show_token(args):
             session_cookies.load(ignore_discard=True, ignore_expires=True)
         except Exception as e:
             if raw:
-                print_json({'_success': False, '_msg': f"Error llegint cookies: {e}"})
+                JsonFormatter(raw=args.raw).show((False, {'_msg': f"Error llegint cookies: {e}"}))
             else:
-                print(f"{AnsiColor.RED}⚠️ Error llegint cookies: {e}{AnsiColor.RESET}")
+                Logger.warning(f"Error llegint cookies: {e}")
             return
 
         try:
@@ -280,26 +312,26 @@ def cmd_show_token(args):
 
             if token:
                 if raw:
-                    print_json({'_success': True, '_data': token})
+                    JsonFormatter(raw=raw).show((True, {'_data': token}))
                 else:
-                    print(f"{AnsiColor.GREEN}🔑 Token de sessió:{AnsiColor.RESET} {token}")
+                    Logger.success(f"Token de sessió 🔑: {token}")
             else:
                 msg = "Cap token trobat a la sessió."
                 if raw:
-                    print_json({'_success': False, '_msg': msg})
+                    JsonFormatter(raw=raw).show((False, {'_msg': msg}))
                 else:
-                    print(f"{AnsiColor.RED}❌ {msg}{AnsiColor.RESET}")
+                    Logger.error(f"{msg}")
         except Exception as e:
             if raw:
-                print_json({'_success': False, '_msg': f"Error llegint token de sessió: {e}"})
+                JsonFormatter(raw=raw).show((False, {'_msg': f"Error llegint token de sessió: {e}"}))
             else:
-                print(f"{AnsiColor.RED}❌ Error llegint token de sessió: {e}{AnsiColor.RESET}")
+                Logger.error(f"Error llegint token de sessió: {e}")
     else:
         msg = "No s'ha trobat cap token desat. Fes login primer."
         if raw:
-            print_json({'_success': False, '_msg': msg})
+            JsonFormatter(raw=args.raw).show((False, {'_msg': msg}))
         else:
-            print(f"{AnsiColor.RED}❌ {msg}{AnsiColor.RESET}")
+            Logger.error(f"{msg}")
 
 def cmd_logout(args, session_mgr):
     """Esborra fitxers de sessió: cookies i token."""
@@ -333,9 +365,9 @@ def cmd_logout(args, session_mgr):
     # Sortida en format RAW (JSON)
     if args.raw:
         if success:
-            print_json({'_success': True})
+            JsonFormatter(raw=args.raw).show((True,))
         else:
-            print_json({'_success': False, '_msg': '; '.join(errors) if errors else ''})
+            JsonFormatter(raw=args.raw).show((False, {'_msg': '; '.join(errors) if errors else ''}))
     else:
         if success:
             Logger.success(f" 👋 Sessió tancada.")
@@ -359,7 +391,7 @@ def cmd_login(args, session_mgr):
     except Exception as e:
         spinner.stop()
         if args.raw:
-            print_json({'_success': False, '_msg': str(e)})
+            JsonFormatter(raw=args.raw).show((False, {'_msg': str(e)}))
         else:
             handle_exception(e, raw=False, msg="Error durant l'autenticació")
         return
@@ -380,15 +412,14 @@ def cmd_login(args, session_mgr):
         session_mgr.save_cookie(resp, domain=args.url.split('//')[-1].split('/')[0])  # extreu domini
         
         if args.raw:
-            print_json({'_success': True, '_msg': payload['_msg'], '_data': payload['_data']})
+            JsonFormatter(raw=args.raw).show((True, {'_msg': payload['_msg'], '_data': payload['_data']}))
         else:
-            msg= "Login correcte. Sessió i Token guardats."
-            Logger.success(msg)
+            Logger.success("Login correcte. Sessió i Token guardats.")
         return
     else:
         msg= f"Error d'autenticació: {payload.get('_msg', 'Error desconegut')}"
         if args.raw:
-            print_json({'_success': False, '_msg': msg})
+            JsonFormatter(raw=args.raw).show((False, {'_msg': msg}))
         else:
             Logger.error(msg)
     
@@ -402,7 +433,7 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
         if not token:
             msg = "No hi ha cap token. Cal fer login primer."
             if args.raw:
-                print_json({'_success': False, '_msg': msg})
+                JsonFormatter(raw=args.raw).show((False, {'_msg': msg}))
             else:
                 Logger.error(msg)
             return None
@@ -454,7 +485,7 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
         if spinner:
             spinner.stop()
         if args.raw:
-            print_json({'_success': False, '_msg': str(e)})
+            JsonFormatter(raw=args.raw).show((False, {'_msg': str(e)}))
         else:
             handle_exception(e, raw=False, msg="Error durant la crida HTTP:")
         return None
@@ -475,7 +506,7 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
     if internal:
         return resp # retorna tot l'objecte Response
 
-    print_json(content, raw=args.raw)
+    JsonFormatter(raw=args.raw).show(content)
 
 def cmd_session(args, session_mgr):
     # Carregar el token desat
