@@ -46,7 +46,7 @@
 - `~/.iredapi_token`: token desat
 - `~/.iredapi_cookies.txt`: cookies de sessió
 
-## 🧪 Exemples d’ús
+## 🐍  Exemples d’ús
 
 ### 🔑 Iniciar sessió
 ```bash
@@ -66,7 +66,11 @@ $ ./iredapi_manager.py session
 Sortida esperada: 
 
 ```bash
-🚀 Cridant a l'API... | ✅ Cookies carregades: 🍪 
+✅ Cookies carregades: 🍪
+
+🚗 Cridant a l'API... |
+
+🏁 Fet!   
 {
   "_success": True,
   "_data": {
@@ -82,7 +86,7 @@ Sortida esperada:
 ```
 Fixa't que mostra `***` en lloc de les dades sensibles. Per veure-les necessitaràs activar la variable d'entorn, o bé passar l'argument `./iredapi_manager.py --show-secrets session`
 
-### 📞 Fer una crida GET
+### 📞 Fer una crida *GET*
 ```bash
 $ ./iredapi_manager.py call -e /user/list
 ```
@@ -91,7 +95,10 @@ Sortida esperada:
 
 ```bash
 ✅ Cookies carregades: 🍪 
-🚀 Cridant a l'API...
+
+🚗 Cridant a l'API... |
+
+🏁 Fet!  
 {
   "_success": true,
   "_data": [
@@ -103,7 +110,38 @@ Sortida esperada:
   ]
 }
 ```
-### 📤 Fer una crida POST amb dades
+### 🐍 Fer una crida *GET* amb paràmetres
+De vegades es vol obtenir dades però amb certs filtres (admesos).
+```bash
+# amb notació JSON
+$ ./iredapi_manager.py call -e '/domains' -d '{"names_only":"yes"}' -m GET
+
+# amb format x-www-form-urlencoded com si fos elnavegador
+$ ./iredapi_manager.py call -e '/domains?names_only=yes' -m GET     
+```
+
+Sortida esperada en ambdós casos:
+
+```bash
+✅ Cookies carregades: 🍪 
+
+🚗 Cridant a l'API... |
+
+🏁 Fet!                                                                         
+
+{
+  "_success": True,
+  "_data": [
+    "< DOMAIN NAME >",
+    "< DOMAIN NAME 2 >",
+    "< DOMAIN NAME 3 >",
+    ...
+  ]
+}
+```
+
+
+### 📤 Fer una crida *POST* amb dades
 ```bash
 $ ./iredapi_manager.py call -e /user/create -m POST -d '{"mail": "nou@exemple.cat", "password": "secret"}'
 ```

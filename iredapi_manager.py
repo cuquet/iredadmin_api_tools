@@ -26,6 +26,7 @@ TOKEN_FILE = os.path.expanduser('~/.iredapi_token')
 COOKIE_FILE = os.path.expanduser('~/.iredapi_cookies.txt')
 # Detectar RAW mode via variable d'entorn
 RAW_MODE = os.getenv('IREDAPI_RAW', '0') == '1'
+DEBUG_ENABLED = os.getenv('IREDAPI_DEBUG', '0') == '1'
 MASK_SENSITIVE_DATA = os.getenv('IREDAPI_MASK_SENSITIVE', '1') != '0'  # per defecte, amaga dades sensibles
 # Nota: != '0' perquè quan és '0', no volem fer masking si també s'afegeix --show-secrets.
 SENSITIVE_KEYS = {'password', 'api_token', 'session_id', 'token'}
@@ -39,7 +40,6 @@ class AnsiColor:
     RESET = '\033[0m'
 
 class Logger:
-    DEBUG_ENABLED = os.getenv('IREDAPI_DEBUG', '0') == '1'
     @staticmethod
     def print_msg(msg, color='', symbol='', prefix='', raw=False, err=False, end='\n', flush=True):
         """
@@ -73,7 +73,7 @@ class Logger:
     @staticmethod
     def info(msg, raw=False, end='\n', flush=True):
         """Missatge informatiu en cian amb ℹ️ i prefix [INFO]."""
-        Logger.print_msg(msg, AnsiColor.CYAN, '\u2139\uFE0F', '[INFO]', raw=raw, end=end, flush=flush)
+        Logger.print_msg(msg, AnsiColor.CYAN, '\u2139\uFE0F', ' [INFO]', raw=raw, end=end, flush=flush)
 
     @staticmethod
     def warning(msg, raw=False, end='\n', flush=True):
@@ -84,7 +84,7 @@ class Logger:
     def debug(msg, raw=False, end='\n', flush=True):
         """Missatge de depuració en groc amb bug 🐛 i prefix [DEBUG]."""
         """Missatge de depuració només si DEBUG_ENABLED és True."""
-        if Logger.DEBUG_ENABLED:
+        if DEBUG_ENABLED:
             Logger.print_msg(msg, AnsiColor.YELLOW, '\U0001F41B', '[DEBUG]', raw=raw, end=end, flush=flush)
 
 def handle_exception(exc, raw=False, msg="Error inesperat:"):
@@ -211,6 +211,7 @@ class Spinner:
         
         # Substituïm línia de spinner pel missatge final
         sys.stdout.write("\r" + " " * self.max_msg_len + "\r")
+        print()
         print(self.done_message)
         print() # línia en blanc després
     
@@ -442,7 +443,10 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
 
     headers = {}
     if token:
+        Logger.debug(f"Token carregat 🔑 (prefix 6 chars): {token[:6]}{'...' if len(token) > 6 else ''}")
         headers['Authorization'] = f"Bearer {token}"
+    else:
+        Logger.debug("Falla el Token 🔑 : ", end='', flush=True)
     headers['Accept'] = 'application/json'
     headers['Content-Type'] = 'application/json'
     
@@ -466,10 +470,10 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
         jar = session_mgr.load_cookie()
         if not args.raw:
             if jar and len(jar):
-                Logger.success("Cookies carregades: 🍪", end='', flush=True)
+                Logger.success("Cookies carregades: 🍪", end='\n', flush=True)
                 for c in jar:
                     Logger.debug(f"  {c.name}={c.value} (domini: {c.domain})")
-                time.sleep(2)  # 👈 força un delay per mostrar el spinner
+                time.sleep(0.1)  # 👈 força un delay per mostrar el spinner
             else:
                 Logger.error("No s'han carregat cookies.")
         spinner = Spinner("Cridant a l'API...", raw=args.raw)
@@ -477,6 +481,7 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
     else:
         spinner = None
         jar = None
+    print()
     Logger.debug(f"Cridant amb URL: {url} | METHOD: {method}")
     try:
         resp = requests.request(method, url, headers=headers, data=data_to_send, verify=verify, cookies=jar, allow_redirects=False)
@@ -491,11 +496,14 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
         return None
     finally:
         if spinner:
-            time.sleep(2)  # 👈 força un delay per mostrar el spinner
+            time.sleep(0.1)  # 👈 força un delay per mostrar el spinner
             spinner.stop()
-    Logger.debug(f"Tipus de resp: {type(resp)}")
-    Logger.debug(f"Contingut de resp: {resp}")
-    Logger.debug(f"Status code: {resp.status_code}")
+        if DEBUG_ENABLED:
+            print()
+        Logger.debug(f"Tipus de resp: {type(resp)}")
+        Logger.debug(f"Contingut de resp: {resp}")
+        Logger.debug(f"Status code: {resp.status_code}")
+
     try:
         content = resp.json()
     except ValueError:
@@ -548,7 +556,7 @@ def main():
     parser.add_argument('--cookies', default=COOKIE_FILE, help='Fitxer de cookies')
     parser.add_argument('--show-secrets', action='store_true', help='Mostra valors sensibles com API token, contrasenyes, etc.')
     parser.set_defaults(func=lambda args: parser.print_help())
-  
+
     subparsers = parser.add_subparsers(title='Subcomandes',dest='command')
 
     login_parser = subparsers.add_parser('login', help='Iniciar sessió i desa cookies')
@@ -596,7 +604,7 @@ def main():
     if args.show_secrets:
         MASK_SENSITIVE_DATA = False
     
-    if Logger.DEBUG_ENABLED:
+    if DEBUG_ENABLED:
         Logger.info("DEBUG mode actiu 🐛")
 
     session_mgr = SessionManager()
