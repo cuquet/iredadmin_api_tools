@@ -61,3 +61,11 @@ All notable changes to this project will be documented in this file.
 
 ## 🔖 v0.14 – 🔖 v0.14:  create JsonFormatter class. Update pending Logger msg
 
+## 🔖 v0.14.1 Updated pending Logger.debug. Add some README examples
+
+## 🔖 v.0.15 🔖 v0.15: Enhance session management and logging:
+- Introduced log_debug function for improved logging.
+- Updated JsonFormatter to handle messages and errors more effectively.
+- Enhanced SessionManager with better cookie and token management.
+- Improved error handling and user feedback during login and session operations.
+
