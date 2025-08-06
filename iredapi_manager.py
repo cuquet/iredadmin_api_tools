@@ -445,9 +445,9 @@ class SessionManager:
         :param args: Arguments CLI, opcional per més context (raw, debug...)
         :return: True si sembla que la sessió ha expirat
         """
-        if not resp:
-            log_debug("❗ Resposta buida: no es pot comprovar si la sessió ha expirat.", 2)
-            return True
+        # if not resp:
+        #     log_debug("❗ Resposta buida: no es pot comprovar si la sessió ha expirat.", 2)
+        #     return True
         
         # 🔁 Redirecció a pàgina de login
         if resp.status_code in (301, 302, 303):
@@ -686,55 +686,60 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
         payload = json.dumps(data).encode('utf-8')
 
     # ⏳ Spinner si no és crida interna
-    spinner = Spinner("Cridant a l'API...", "Fet!", raw=args.raw) # if not internal else None
+    spinner = Spinner("Cridant a l'API...", "Fet!", raw=args.raw) if not internal else None
     if spinner:
         spinner.start()
 
+    max_retries = 2
+    resp = None
+    
     try:
-        # 🌐 Fa la crida HTTP amb autenticació:
-        #    - Si s'utilitzen cookies, s'inclouen automàticament via `session_mgr.load_cookie()`
-        resp = requests.request(
-            method, 
-            url, 
-            headers=headers, 
-            data=payload, 
-            verify=verify, 
-            cookies=session_mgr.load_cookie() if not internal else None, 
-            allow_redirects=True
-        )
-        
-        # 🕒 Si la sessió ha caducat (ex: redirecció 303 → login page), intenta renovar-la
-        if session_mgr.is_session_expired(resp):
-            spinner.stop() # if spinner else None
-            Logger.warning("[cmd_call] Sessió caducada 🕒. Reintentant amb nou login...")
-            
-            # 🔁 Intenta reiniciar la sessió i repetir la crida
-            #resp = session_mgr.handle_session_expired(args, method, url, headers, payload, verify)
-            resp = session_mgr.handle_session_expired(
-                args=args,
-                method=method,
-                url=url,
-                headers=headers,
-                data_to_send=payload,
-                verify=verify
-            )
-            if not resp:
-                Logger.error("[cmd_call] Error al reintentar després de renovar la sessió.", raw=args.raw)
-                return None
-
-        resp.raise_for_status()  # ❗️ Llança excepció si el codi de resposta és 4xx o 5xx
+        for attempt in range(max_retries):
+            try:
+                log_debug(f"🔁 Intent {attempt + 1}/{max_retries}")
+                # 🌐 Crida HTTP amb autenticació:
+                #    - Si s'utilitzen cookies, s'inclouen automàticament via `session_mgr.load_cookie()`
+                resp = requests.request(
+                    method, 
+                    url, 
+                    headers=headers, 
+                    data=payload, 
+                    verify=verify, 
+                    cookies=session_mgr.load_cookie() if not internal else None, 
+                    allow_redirects=True
+                )
+                
+                # 🕒 Si la sessió ha caducat (ex: redirecció 303 → login page), intenta renovar-la
+                if session_mgr.is_session_expired(resp):
+                    spinner.stop() if spinner else None
+                    Logger.warning("[cmd_call] Sessió caducada 🕒. Reintentant amb nou login...")
+                    
+                    # 🔁 Intenta reiniciar la sessió i repetir la crida
+                    resp = session_mgr.handle_session_expired(args, method, url, headers, payload, verify)
+                    if not resp:
+                        Logger.error("[cmd_call] Error al reintentar després de renovar la sessió.", raw=args.raw)
+                        return None
+                    
+                # ❗️ Llança excepció si el codi de resposta és 4xx o 5xx
+                resp.raise_for_status()
+                break # Èxit → sortim del bucle
+            except requests.exceptions.RequestException as e:
+                log_debug(f"❌ Error en l'intent {attempt + 1}: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    log_debug(f" 🌐 Resposta: {e.response.text.strip()}")
+                if attempt < max_retries - 1:
+                    time.sleep(1)  # Espera abans de reintentar
+                    continue
+                else:
+                    raise  # el tornem a llençar i ho agafem fora
     except requests.exceptions.RequestException as e:
-        if spinner:
-            spinner.stop()
-        Logger.error(f"[cmd_call] Error durant la crida HTTP ({type(e).__name__}: {e})", raw=args.raw)
+        Logger.error(f"[cmd_call] ❌ Error durant la crida HTTP ({type(e).__name__}: {e})", raw=args.raw)
         return None
     finally:
         if spinner:
             time.sleep(3)  # 👈 força un delay per mostrar el spinner
             spinner.stop()
-        # log_debug(f"Codi de resposta: {resp.status_code}")
-        # log_debug(f"Contingut de resp: {resp}")
-        log_debug(f"🌐 Resposta: {resp.status_code} {resp.reason}")
+        log_debug(f"🌐 Resposta: {resp.status_code} {resp.reason}" if resp else "🌐 No s'ha rebut cap resposta HTTP")
 
     # 📄 Intenta interpretar resposta com JSON
     try:
