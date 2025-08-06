@@ -9,6 +9,9 @@ import getpass
 import time
 import threading
 import requests
+from typing import Optional
+import shutil
+from wcwidth import wcswidth
 
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -31,11 +34,13 @@ DEBUG_ENABLED = os.getenv('IREDAPI_DEBUG', '0') == '1'
 MASK_SENSITIVE_DATA = os.getenv('IREDAPI_MASK_SENSITIVE', '1') != '0'  # per defecte, amaga dades sensibles
 # Nota: != '0' perquè quan és '0', no volem fer masking si també s'afegeix --show-secrets.
 SENSITIVE_KEYS = {'password', 'api_token', 'session_id', 'token'}
+SPINNER_START_ICON = "🚗" # "🚀" "✈️" "🚗" "🏎️" "📡"
+SPINNER_END_ICON = "🏁" # "🛬" "🎯"
 
-def log_debug(msg):
+def log_debug(msg, depth=1):
     import inspect
-    caller = inspect.stack()[1].function
-    Logger.debug(f"[{caller}] {msg}")
+    frame = inspect.stack()[depth]
+    Logger.debug(f"[{frame.function}] {msg}")
 
 class AnsiColor:
     RED = '\033[38;2;220;100;100m'
@@ -166,7 +171,7 @@ class JsonFormatter:
                 d = OrderedDict({'_success': False, '_msg': 'Format de dades no suportat'})
                 log_debug(f"JsonFormatter.format: format no suportat: {type(result)} -> {repr(result)}")
         except Exception as e:
-            log_debug(f"Error processant dades: {type(e)} -> {e}")    
+            log_debug(f"❌ Error processant dades: {type(e)} -> {e}")
             d = OrderedDict({'_success': False, '_msg': f'Error processant dades: {str(e)}'})
 
         return d
@@ -179,56 +184,78 @@ class JsonFormatter:
             print(self.colorize(data))
 
 class Spinner:
-    # SPINNER_START_ICON = "🏎️" # "🚀" "✈️" "🚗"
-    # SPINNER_END_ICON = "🏁" 🛬 🎯
-    def __init__(self, message="Loading...", raw=False, done_message=None):
+    def __init__(self, text_start="Cridant a l'API...", text_end="Fet!", delay=0.1, raw=False):
+        """
+        :param text_start: Text que es mostra quan comença el spinner.
+        :param text_end: Text que es mostra quan s'atura el spinner.
+        :param delay: Temps entre cada pas de l'animació (mínim 0.05s, màxim 1.0s).
+        :param raw: Si és True, només mostra una línia neta amb animació i resultat final.
+        """
         self.raw = raw
-        self.stop_running = False
-        self.thread = None
-        self.max_msg_len = 80  # límit fix
-        prefix = "🚗 "
-        if len(message) > self.max_msg_len - len(prefix):
-            self.message = prefix + message[:self.max_msg_len - len(prefix) - 3] + '...'
-        else:
-            self.message = prefix + message
-        self.done_message = done_message or "🏁 Fet!"
+        self.delay = max(0.05, min(delay, 1.0))
+
+        # Icones i textos
+        self.text_start = f"{SPINNER_START_ICON} {text_start}"
+        self.text_end = f"{SPINNER_END_ICON} {text_end}"
+
+        # Caràcters d'animació
+        self.frames = ["|", "/", "-", "\\"]
+        self.frame_index = 0
+
+        # Altres paràmetres d'estat
+        self._stop_event = threading.Event()
+        self._thread = None
+        self.columns = shutil.get_terminal_size().columns
+
+    def _full_line(self, text, symbol):
+        """Construeix una línia completa amb text + símbol, padding fins omplir terminal."""
+        full_text = f"{text} {symbol}"
+        width = wcswidth(full_text)
+        padding = max(0, self.columns - width)
+        return f"{full_text}{' ' * padding}"
+
+    def _spinner_task(self):
+        while not self._stop_event.is_set():
+            symbol = self.frames[self.frame_index]
+            self.frame_index = (self.frame_index + 1) % len(self.frames)
+            line = self._full_line(self.text_start, symbol)
+            sys.stdout.write(f"\r\033[96m{line}\033[0m")  # Cyan + Reset
+            sys.stdout.flush()
+            time.sleep(self.delay)
 
     def start(self):
+        self._stop_event.clear()
         if self.raw:
-            return
-        
-        # Esborrem línia prèvia
-        sys.stdout.write("\r" + " " * self.max_msg_len + "\r")
-        sys.stdout.flush()
-        
-        # Afegim línia en blanc
-        print()
-        
-        self.stop_running = False
-        self.thread = threading.Thread(target=self._spin)
-        self.thread.start()
+            # Mostra línia inicial però no anima
+            symbol = self.frames[self.frame_index]
+            line = self._full_line(self.text_start, symbol)
+            sys.stdout.write(f"\r\033[96m{line}\033[0m")
+            sys.stdout.flush()
+        else:
+            self._thread = threading.Thread(target=self._spinner_task)
+            self._thread.start()
 
     def stop(self):
+        self._stop_event.set()
+
         if self.raw:
-            return
-        self.stop_running = True
-        if self.thread:
-            self.thread.join()
-        
-        # Substituïm línia de spinner pel missatge final
-        sys.stdout.write("\r" + " " * self.max_msg_len + "\r")
-        print()
-        print(self.done_message)
-        print() # línia en blanc després
-    
-    def _spin(self):
-        spinner_chars = ['|', '/', '-', '\\']
-        idx = 0
-        while not self.stop_running:
-            sys.stdout.write(f"\r{self.message} {spinner_chars[idx % len(spinner_chars)]}")
+            # Sobreescriu línia amb el missatge final
+            line = self._full_line(self.text_end, "✅")
+            sys.stdout.write(f"\r{line}\n")
             sys.stdout.flush()
-            time.sleep(0.1)
-            idx += 1
+        else:
+            if self._thread:
+                self._thread.join()
+            # Esborra línia anterior
+            sys.stdout.write("\r" + " " * self.columns + "\r")
+            sys.stdout.flush()
+            self._print_done()
+
+    def _print_done(self):
+        """Mostra el missatge final amb ✅, alineat completament."""
+        line = self._full_line(self.text_end, "✅")
+        sys.stdout.write(f"\033[96m{line}\033[0m\n")
+        sys.stdout.flush()
 
 class SessionManager:
     """
@@ -241,15 +268,26 @@ class SessionManager:
         
     def _log_cookie_jar(self, jar):
         if jar and len(jar):
-            log_debug("🍪 Cookies carregades o guardades")
+            log_debug("🍪 Cookies carregades o guardades", 2)
             total = len(jar)
             for i, c in enumerate(jar):
                 is_last = (i == total - 1)
                 prefix = "└─ " if is_last else "├─ "
                 domain = f"(domini: {c.domain})" if c.domain else "(sense domini)"
-                log_debug(f"{prefix}{c.name} = {c.value} {domain}")
+                log_debug(f"{prefix}{c.name} = {c.value} {domain}", 2)
         else:
             Logger.warning("Cap cookie disponible al jar.")
+
+    def _log_token(self, token: Optional[str]):
+        if token:
+            log_debug("🔑 Token carregat de la sessió actual", 2)
+            display_token = token if not MASK_SENSITIVE_DATA else f"{token[:6]}...{token[-4:]}"
+            log_debug(f"└─ Bearer {display_token}", 2)
+        else:
+            Logger.warning("⚠️ No s'ha trobat cap token d'autenticació.")
+
+    def _log_credentials(self, args):
+        log_debug(f"👤 Usuari: {args.username}, 🔑 Contrasenya: {'*' * len(args.password or '')}", 2)
 
     def save_cookie(self, resp, domain='localhost'):
         if not resp.cookies:
@@ -278,11 +316,11 @@ class SessionManager:
         try:
             jar.load(ignore_discard=True, ignore_expires=True)
         except Exception as e:
-            Logger.error(f"No s'han pogut carregar les cookies: {e}")
+            log_debug(f"No s'han pogut carregar les cookies: {e}")
             return None
         
         if len(jar) == 0:
-            Logger.warning("Fitxer de cookies carregat, però està buit.")
+            log_debug("Fitxer de cookies carregat, però està buit.")
             return None
 
         self._log_cookie_jar(jar)
@@ -293,45 +331,66 @@ class SessionManager:
         try:
             if os.path.exists(self.cookie_file):
                 os.remove(self.cookie_file)
-                log_debug(f"Fitxer de cookies '{self.cookie_file}' eliminat.")
+                log_debug(f"🗑️  Fitxer de cookies '{self.cookie_file}' eliminat.")
             else:
-                log_debug(f"Fitxer de cookies '{self.cookie_file}' no existeix.")
+                log_debug(f"📄❓ Fitxer de cookies '{self.cookie_file}' no existeix.")
             return True, None
         except Exception as e:
             return False, f"Error eliminant cookies: {e}"
-            
+    
+    def cookie_exists(self) -> bool:
+        # 🍪 Comprovem si hi ha cookies
+        if os.path.exists(self.cookie_file):
+            try:
+                jar = self.load_cookie()
+                return jar is not None and len(jar) > 0
+            except Exception as e:
+                log_debug(f"❌ No s'han pogut carregar les cookies: {e}", 2)
+                return False
+        return False
+    
     def save_token(self, token):
         try:
             with open(self.token_file, 'w') as f:
                 f.write(token)
             os.chmod(self.token_file, 0o600)
+            self._log_token(token)
         except Exception as e:
             Logger.error(f"No s'ha pogut guardar el token: {e}")
 
-    def load_token(self, args):
-        if args.token:
-            return args.token
-        if not os.path.exists(self.token_file):
-            return None
-        with open(self.token_file, 'r') as f:
-            return f.read().strip()
+    def load_token(self):
+        """📥 Carrega el token des del fitxer, si existeix i és vàlid."""
+        try:
+            if not os.path.exists(self.token_file):
+                return None
+            with open(self.token_file, 'r') as f:
+                token = f.read().strip()
+                if token and len(token) > 10:
+                    return token
+                else:
+                    log_debug("⚠️ Token buit o massa curt.")
+        except Exception as e:
+            log_debug(f"❌ Error llegint el token: {e}")
+        return None
 
     def delete_token(self):
         try:
             if os.path.exists(self.token_file):
                 os.remove(self.token_file)
-                log_debug(f"Fitxer de token '{self.token_file}' eliminat.")
+                log_debug(f"🗑️  Fitxer de token '{self.token_file}' eliminat.")
             else:
-                log_debug(f"Fitxer de token '{self.token_file}' no existeix.")
+                log_debug(f"📄❓ Fitxer de token '{self.token_file}' no existeix.")
             return True, None
         except Exception as e:
             return False, f"Error eliminant token: {e}"
 
     def token_exists(self):
-        return os.path.exists(self.token_file) and os.path.getsize(self.token_file) > 0
-
-    def _log_credentials(self, args):
-        log_debug(f"Usuari: {args.username}, Contrasenya: {'*' * len(args.password or '')}")
+        """🧪 Retorna True si hi ha un token vàlid i registrable."""
+        token = self.load_token()
+        if token:
+            self._log_token(token)
+            return True
+        return False
         
     def ensure_credentials(self, args):
         # ❌ Si no som en entorn interactiu i falten credencials, no podem continuar
@@ -358,34 +417,78 @@ class SessionManager:
         return True
 
     def get_auth_headers(self, args, include_content_type=True, requires_token=True):
-        token = self.load_token(args) if requires_token else None
         headers = {"Accept": "application/json"}
-        
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-            log_debug(f"Token disponible 🔑 : {token[:6]}{'...' if len(token) > 6 else ''}")
-        else:
-            log_debug("Token NO disponible ⚠️")
+
+        if requires_token and self.token_exists():
+            token = self.load_token()
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+                self._log_token(token)
+            else:
+                Logger.warning("⚠️ Token invàlid o buit tot i existir el fitxer.")
+        elif requires_token:
+            Logger.warning("⚠️ No s'ha trobat cap token vàlid.")
         
         if include_content_type:
             headers["Content-Type"] = "application/json"
-        
+
         return headers
 
-    def is_expired_session(self, resp, args):
+    def is_session_expired(self, resp) -> bool:
         """
-        Comprova si la sessió ha expirat.
-        Retorna True si la sessió ha expirat, False en cas contrari.
+        Detecta si la sessió ha expirat basant-se en:
+        - Redireccions (ex: 302/303) cap a pàgines de login
+        - Codis 401/403 quan cal autenticació
+        - Contingut HTML o JSON que suggereix expiració de sessió
+
+        :param resp: L'objecte requests.Response
+        :param args: Arguments CLI, opcional per més context (raw, debug...)
+        :return: True si sembla que la sessió ha expirat
         """
-        if resp is None:
-            return False
-        if resp.status_code == 303:
-            Logger.info("Sessió caducada 🕒: Cal tornar a fer login.", raw=args.raw)
+        if not resp:
+            log_debug("❗ Resposta buida: no es pot comprovar si la sessió ha expirat.", 2)
             return True
+        
+        # 🔁 Redirecció a pàgina de login
+        if resp.status_code in (301, 302, 303):
+            location = resp.headers.get("Location", "")
+            if location and ("/login" in location or "auth" in location):
+                log_debug(f"🔁 Redirecció a login detectada: {location}", 2)
+                return True
+        
+        # 🔒 Resposta que indica falta d'autenticació
+        if resp.status_code in (401, 403):
+            log_debug(f"🔒 Resposta amb status {resp.status_code} → probablement sessió expirada.", 2)
+            return True
+        
+        # 🔍 Contingut HTML que suggereix login requerit
+        content_type = resp.headers.get("Content-Type", "")
+        if "text/html" in content_type:
+            if "login" in resp.text.lower() and "password" in resp.text.lower():
+                log_debug("🔐 HTML suggereix pantalla de login.", 2)
+                return True
+        
+        # 📦 JSON que diu que cal tornar a iniciar sessió
+        if "application/json" in content_type:
+            try:
+                data = resp.json()
+                if isinstance(data, dict):
+                    message = str(data.get("message", "")).lower()
+                    if "expired" in message or "unauthorized" in message:
+                        log_debug(f"📭 Missatge JSON d'error: {message}", 2)
+                        return True
+            except Exception as e:
+                log_debug(f"❌ No s'ha pogut parsejar JSON: {type(e).__name__}: {e}", 2)
+
+        # 🔎 Si tot ha fallat, considerem que la sessió és vàlida
+        log_debug(f"🌐 Resposta: {resp.status_code} {resp.reason}", 2)
         return False
 
-    def handle_expired_session(self, args, method, url, headers, data_to_send, verify):
-        Logger.info("Sessió caducada 🕒: esborrem token i cookies. Cal tornar a fer login.", raw=args.raw)
+    def is_session_valid(self) -> bool:
+        return self.cookie_exists() or self.token_exists()
+
+    def handle_session_expired(self, args, method, url, headers, data_to_send, verify):
+        log_debug("🕒 Sessió caducada: esborrem token i cookies. Cal tornar a fer login.")
 
         success, errors = self.clear_session()
         if not success:
@@ -394,30 +497,28 @@ class SessionManager:
                 log_debug(f"  - {err}")
             return None
 
-        if not self.ensure_credentials(args):
-            Logger.error("No s'han pogut garantir les credencials per tornar a fer login.", raw=args.raw)
+        if not self.ensure_credentials(args) or not cmd_login(args, self):
+            log_debug("No s'han pogut garantir les credencials per tornar a fer login.")
             return None
-        self._log_credentials(args)
-
-        if not cmd_login(args, self):
-            Logger.error("No s'ha pogut iniciar sessió automàticament.", raw=args.raw)
-            return None
-
         Logger.info("Sessió iniciada correctament. Reintentant la crida 🔁...")
+
+        # 🔁 Torna a carregar headers i cookies després del login
+        headers = self.get_auth_headers(args, include_content_type=True, requires_token=True)
+        cookies = self.load_cookie()
 
         try:
             response = requests.request(
                 method,
                 url,
-                headers=self.get_auth_headers(args, requires_token=True),
+                headers=headers,
                 data=data_to_send,
                 verify=verify,
-                cookies=self.load_cookie(),
+                cookies=cookies,
                 allow_redirects=False
             )
             return response
         except requests.exceptions.RequestException as e:
-            Logger.error(f"No s'ha pogut repetir la crida: {e}", raw=args.raw)
+            Logger.error(f"[handle_session_expired] No s'ha pogut repetir la crida: {e}", raw=args.raw)
             return None
 
     def clear_session(self):
@@ -436,12 +537,12 @@ class SessionManager:
             errors.append(err_cookie)
 
         if success:
-            log_debug("Sessió esborrada correctament 🧼. Cal tornar a iniciar sessió.")
+            log_debug("🧼 Sessió esborrada correctament. Cal tornar a iniciar sessió.")
         else:
-            log_debug(f"Sessió no esborrada completament: {errors}")
+            log_debug(f"❌ Sessió no esborrada completament: {errors}")
 
-        return success, errors
-    
+        return success, errors 
+
 
 def should_skip_ssl_verification(args):
     # Ignora errors SSL si --insecure o variable d'entorn IREDAPI_INSECURE=1
@@ -499,7 +600,7 @@ def cmd_login(args, session_mgr):
     url = f"{args.url}/login"
     payload = {'username': args.username, 'password': args.password}
 
-    spinner = Spinner("Fent login...", raw=args.raw)
+    spinner = Spinner("Cridant a l'API...", "Fet!", raw=args.raw)
     spinner.start()
     try:
         resp = cmd_call(args, session_mgr, url=url, method='POST', data=payload, internal=True)
@@ -509,11 +610,11 @@ def cmd_login(args, session_mgr):
             JsonFormatter(raw=args.raw).show((False, {'_msg': str(e)}))
         else:
             Logger.error("Error durant l'autenticació.", raw=args.raw)
-            log_debug(f"Excepció: {type(e).__name__} -> {e}")
+            log_debug(f"❌ Excepció: {type(e).__name__} -> {e}")
         return False  # ❌ Fallada durant la petició
     finally:
         spinner.stop()
-        log_debug(f"Resposta: {resp}")
+        log_debug(f"🌐 Resposta: {resp}")
 
     if resp is None:
         # Ja s'ha mostrat error dins cmd_call, només sortim
@@ -530,7 +631,6 @@ def cmd_login(args, session_mgr):
         if args.raw:
             JsonFormatter(raw=args.raw).show((True, {'_msg': payload['_msg'], '_data': payload['_data']}))
         else:
-            print("\r" + " " * 80 + "\r")  # Neteja línia de spinner
             Logger.success("Login correcte. Sessió i Token guardats.")
         return True  # ✅ Login correcte
     else:
@@ -559,10 +659,21 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
     # Resol URL i mètode si no vénen específicats
     url = url or f"{args.url.rstrip('/')}{args.endpoint.rstrip('/')}"
     method = (method or args.method).upper()
-    headers = session_mgr.get_auth_headers(args, include_content_type=True, requires_token=not internal)
     
-    log_debug(f"Iniciant crida url={url}, method={method}, headers={headers}, internal={internal}...")
+    # ✨ Si no és internal i no tenim sessió activa, forcem login
+    if not internal and not session_mgr.is_session_valid():
+        Logger.info(f"[cmd_call] No hi ha sessió activa. S'inicia login interactiu...", raw=args.raw)
+        if not session_mgr.ensure_credentials(args) or not cmd_login(args, session_mgr):
+            Logger.error(f"[cmd_call] No s'ha pogut iniciar sessió.", raw=args.raw)
+            return None
+    
+    # 🛂 Construïm capçaleres d'autenticació
+    #    → Si és sessió amb token: s'inclou "Authorization: Bearer ..."
+    #    → Si només fem servir cookies: no s'inclou token si internal=True
+    headers = session_mgr.get_auth_headers(args, include_content_type=True, requires_token=not internal)
+    log_debug(f"🌐 Iniciant crida url={url}, method={method}, headers={headers}, internal={internal}...")
 
+    # 📦 Prepara el cos de la petició
     payload = None
     if data is None and args.data:
         try:
@@ -574,42 +685,44 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
     elif data is not None:
         payload = json.dumps(data).encode('utf-8')
 
-    if not internal:
-        if not session_mgr.load_token(args):
-            Logger.error(f"No hi ha cap token i if not internal és: {not internal}. Cal fer login primer.", raw=args.raw)
-            return None
-        jar = session_mgr.load_cookie()
-        spinner = Spinner("Cridant a l'API...", raw=args.raw)
+    # ⏳ Spinner si no és crida interna
+    spinner = Spinner("Cridant a l'API...", "Fet!", raw=args.raw) # if not internal else None
+    if spinner:
         spinner.start()
-    else:
-        jar = None
-        spinner = None
 
     try:
+        # 🌐 Fa la crida HTTP amb autenticació:
+        #    - Si s'utilitzen cookies, s'inclouen automàticament via `session_mgr.load_cookie()`
         resp = requests.request(
             method, 
             url, 
             headers=headers, 
             data=payload, 
             verify=verify, 
-            cookies=jar, 
-            allow_redirects=False
+            cookies=session_mgr.load_cookie() if not internal else None, 
+            allow_redirects=True
         )
-        # Si la sessió ha caducat (ex: redirecció 303 → login page), intenta renovar-la
-        if session_mgr.is_session_expired(resp, args):
-            log_debug("Sessió expirada. S'intenta reautenticació automàtica.")
-            resp = session_mgr.handle_expired_session(
+        
+        # 🕒 Si la sessió ha caducat (ex: redirecció 303 → login page), intenta renovar-la
+        if session_mgr.is_session_expired(resp):
+            spinner.stop() # if spinner else None
+            Logger.warning("[cmd_call] Sessió caducada 🕒. Reintentant amb nou login...")
+            
+            # 🔁 Intenta reiniciar la sessió i repetir la crida
+            #resp = session_mgr.handle_session_expired(args, method, url, headers, payload, verify)
+            resp = session_mgr.handle_session_expired(
                 args=args,
                 method=method,
                 url=url,
                 headers=headers,
-                data_to_send=payload, #json.dumps(data) if isinstance(data, dict) else data,
+                data_to_send=payload,
                 verify=verify
             )
             if not resp:
                 Logger.error("[cmd_call] Error al reintentar després de renovar la sessió.", raw=args.raw)
                 return None
-        resp.raise_for_status()  # ❗️ Proposa excepció si status >= 400
+
+        resp.raise_for_status()  # ❗️ Llança excepció si el codi de resposta és 4xx o 5xx
     except requests.exceptions.RequestException as e:
         if spinner:
             spinner.stop()
@@ -617,29 +730,23 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
         return None
     finally:
         if spinner:
-            time.sleep(0.1)  # 👈 força un delay per mostrar el spinner
+            time.sleep(3)  # 👈 força un delay per mostrar el spinner
             spinner.stop()
         # log_debug(f"Codi de resposta: {resp.status_code}")
         # log_debug(f"Contingut de resp: {resp}")
-        log_debug(f"Resposta: {resp.status_code} {resp.reason}")
+        log_debug(f"🌐 Resposta: {resp.status_code} {resp.reason}")
 
-
+    # 📄 Intenta interpretar resposta com JSON
     try:
         content = resp.json()
     except ValueError:
-        Logger.warning("Resposta no és JSON vàlid.")
+        Logger.warning("[cmd_call] Resposta no és JSON vàlid.")
         return None
     
+    # 📤 Retorna resultat si és internal. Si no, el mostra formatat
     return resp if internal else JsonFormatter(raw=args.raw).show(content)
 
 def cmd_session(args, session_mgr):
-    # Carregar el token desat
-    token = session_mgr.load_token(args)
-    if not token:
-        # Si no hi ha token, mostrar un error
-        Logger.error("No hi ha token disponible.", raw=args.raw)
-        return
-    args.token = token  # Assignar el token carregat a args per a la crida    
     # Fer la crida a l'API per obtenir informació de la sessió
     cmd_call(
         args, 
@@ -669,7 +776,6 @@ def main():
     parser.add_argument('--url', default=API_BASE, help='URL base de l\'API')
     parser.add_argument('-k', '--insecure', action='store_true', help='Ignora errors de certificat SSL')
     parser.add_argument('-r', '--raw', action='store_true', help='Sortida RAW sense colors')
-    parser.add_argument('-t', '--token', help='Token d\'autenticació personalitzat')
     parser.add_argument('--cookies', default=COOKIE_FILE, help='Fitxer de cookies')
     parser.add_argument('--show-secrets', action='store_true', help='Mostra valors sensibles com API token, contrasenyes, etc.')
     parser.set_defaults(func=lambda args: parser.print_help())
@@ -687,7 +793,6 @@ def main():
     call_parser = subparsers.add_parser('call', help='Fer una crida a l\'API')
     call_parser.add_argument('--url', default=API_BASE, help='URL base de l\'API')
     call_parser.add_argument('-e', '--endpoint', required=True, help='Endpoint API (ex: /api/spampolicy/global)')
-    call_parser.add_argument('-t', '--token', help='Token Bearer (opcional si has fet login abans)')
     call_parser.add_argument('-m','--method', default='GET', choices=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], help='Mètode HTTP per a la crida (GET per defecte)')
     call_parser.add_argument('-d', '--data', help='Dades a enviar en POST/PUT/PATCH (format text o JSON)')
     call_parser.add_argument('-c', '--cookies', default=COOKIE_FILE, help='Fitxer cookies')
@@ -722,7 +827,7 @@ def main():
         MASK_SENSITIVE_DATA = False
     
     if DEBUG_ENABLED:
-        Logger.info("DEBUG mode actiu 🐛")
+        Logger.info("🐛 [DEBUG] mode actiu")
 
     session_mgr = SessionManager()
     if args.command in ('login', 'call', 'logout', 'session'):
