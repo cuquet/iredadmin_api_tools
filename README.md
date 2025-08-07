@@ -26,6 +26,9 @@
 - Suport per output RAW (`--raw`) i desactivació de verificació SSL (`--insecure`).
 - JSON amb colors i símbols Unicode per facilitar la lectura (o RAW per scripts).
 - Spinner visual per indicar accions en progrés.
+- Tancar la sessió (`logout`) esborrant fitxers de token i cookies.
+  - - Per defecte utilitza `~/.iredapi_token` i `~/.iredapi_cookies.txt`.
+  - - Es poden especificar fitxers alternatius amb `--token` i `--cookies`.
 - Configurable amb variables d’entorn:
   - `IREDAPI_URL`: URL base de l’API (per defecte: `https://localhost/iredadmin/api`)
   - `IREDAPI_RAW=1`: activa mode RAW per defecte
@@ -168,7 +171,13 @@ Sortida esperada:
 
 ### 🚪 Tancar sessió
 ```bash
+# Esborra sessió usant els fitxers per defecte
 $ ./iredapi_manager.py logout
+```
+
+```bash
+# Esborra fitxers personalitzats de sessió
+$ ./iredapi_manager.py logout -t /tmp/token_admin -c /tmp/cookies_admin.txt
 ```
 
 Sortida esperada: 
@@ -239,29 +248,30 @@ $ ./iredapi_manager.py --help
 Sortida esperada: 
 
 ```bash
-usage: iredapi [-h] [--url URL] [-k] [-r] [-t TOKEN] [--cookies COOKIES] {login,call,logout,token,session} ...
+usage: iredapi [-h] [-r] [--show-secrets] {login,call,logout,token,session} ...
 
-🔐 CLI per a l'API iRedAdmin Pots usar la variable d'entorn IREDAPI_INSECURE=1 per ignorar errors SSL. Opció -k / --insecure equivalent a curl -k. La URL base per defecte és https://localhost/iredadmin però la pots
-canviar amb: --url o la variable d'entorn IREDAPI_URL però si indiques --raw, el JSON es mostra en format normal (sense codi de color).
+🔐 CLI per a l'API iRedAdmin
+
+Pots usar la variable d'entorn IREDAPI_INSECURE=1 per ignorar errors SSL o bé l'opció -k/--insecure.
+La URL base per defecte és https://localhost/iredadmin però la pots canviar amb --url o IREDAPI_URL.
+Si indiques -r / --raw, el JSON es mostra en cru (sense color ni tabulació).
 
 optional arguments:
   -h, --help            show this help message and exit
-  --url URL             URL base de l'API
-  -k, --insecure        Ignora errors de certificat SSL
   -r, --raw             Sortida RAW sense colors
-  -t TOKEN, --token TOKEN
-                        Token d'autenticació personalitzat
-  --cookies COOKIES     Fitxer de cookies
+  --show-secrets        Mostra valors sensibles com API token, contrasenyes, etc.
 
 Subcomandes:
   {login,call,logout,token,session}
     login               Iniciar sessió i desa cookies
     call                Fer una crida a l'API
-    logout              Esborra el fitxer de cookies
+    logout              Esborra el fitxer de cookies i de token
     token               Mostra el token desat
-    session             Mostrar informació de sessió actual
+    session             Mostrar informació de sessió actual (autenticació opcional si no hi ha sessió)
 
-ℹ️ Per a més ajuda, usa --help o ajuda subcomanda. ℹ️ Per a més informació sobre les API, visita: https://iredmail.org/api.html
+Per a més ajuda, usa --help o ajuda subcomanda.
+Per a més informació sobre les API, visita: https://iredmail.org/api.html
+
 ```
 
 # 📁 .env per a iredapi_manager.py

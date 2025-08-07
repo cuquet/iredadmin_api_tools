@@ -69,3 +69,14 @@ All notable changes to this project will be documented in this file.
 - Enhanced SessionManager with better cookie and token management.
 - Improved error handling and user feedback during login and session operations.
 
+## 🔖 v0.15.1 🔖 v0.15.1: Refactor session management:
+- Replace Logger calls with log_debug for improved logging consistency
+- Add cookie_exists and is_session_valid methods
+
+## 🔖 v0.16 🔖 v0.16 : Improve session handling with retry logic and enhance error logging in cmd_call
+
+## 🔖 v0.17 🔖 v0.17  Enhance session management and logging:
+- Refactor session handling methods to accept custom paths for token and cookie files.
+- Improve error handling and logging consistency in session operations.
+- Update README to reflect changes in logout functionality and session management.
+
