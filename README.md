@@ -5,30 +5,28 @@
 `iredapi_manager.py` és una eina de línia de comandes (CLI) per interactuar amb l'API REST d’iRedAdmin. Facilita operacions com login, consultes d’usuaris i administració remota de comptes mitjançant crides HTTP. Està pensada per a administradors de sistemes que treballin amb iRedMail.
 
 - Implementa una CLI senzilla per interactuar amb l’API d’iRedAdmin:
-  - Login i desar token + cookies.
+  - Login i desar cookies.
   - Fer crides HTTP (GET, POST, PUT, DELETE, PATCH).
-  - Mostrar el token.
-  - Logout (esborrar cookies i token).
+  - Logout (esborrar cookies).
 - Mostra JSON amb colors ANSI per facilitar la lectura.
 - Utilitza un spinner ASCII per feedback visual a la consola.
 - Permet ignorar errors SSL (com `curl -k`).
-- Usa fitxers per emmagatzemar cookies (`~/.iredapi_cookies.txt`) i token (`~/.iredapi_token`).
+- Usa fitxers per emmagatzemar cookies (`~/.iredapi_cookies.txt`).
 - Les URLs, fitxers de cookies i paràmetres són configurables via arguments i variables d’entorn.
 
 ## 1. 🔧 Funcionalitats
 
 - Iniciar sessió (`login`) amb nom d’usuari i contrasenya.
-- Desa automàticament el token i les cookies.
+- Desa automàticament les cookies.
 - Crides a l’API (`call`) amb suport per GET, POST, PUT, DELETE i PATCH.
-- Mostrar el token actual (`token`).
 - Mostrar la sessió actual (`session`).
-- Tancar la sessió (`logout`) esborrant fitxers de token i cookies.
+- Tancar la sessió (`logout`) esborrant el fitxer de cookies.
 - Suport per output RAW (`--raw`) i desactivació de verificació SSL (`--insecure`).
 - JSON amb colors i símbols Unicode per facilitar la lectura (o RAW per scripts).
 - Spinner visual per indicar accions en progrés.
-- Tancar la sessió (`logout`) esborrant fitxers de token i cookies.
-  - - Per defecte utilitza `~/.iredapi_token` i `~/.iredapi_cookies.txt`.
-  - - Es poden especificar fitxers alternatius amb `--token` i `--cookies`.
+- Tancar la sessió (`logout`) esborrant fitxer de cookies.
+  - - Per defecte utilitza `~/.iredapi_cookies.txt`.
+  - - Es podet especificar fitxer alternatiu amb `--cookies`.
 - Configurable amb variables d’entorn:
   - `IREDAPI_URL`: URL base de l’API (per defecte: `https://localhost/iredadmin/api`)
   - `IREDAPI_RAW=1`: activa mode RAW per defecte
@@ -46,7 +44,6 @@
 
 ## 1. 📁 Fitxers utilitzats
 
-- `~/.iredapi_token`: token desat
 - `~/.iredapi_cookies.txt`: cookies de sessió
 
 ## 🐍  Exemples d’ús
@@ -59,7 +56,7 @@ Contrasenya: ********
 Sortida esperada: 
 
 ```bash
-✅ Login correcte. Token guardat.
+✅ Login correcte.
 ```
 ### 👤 Consultar sessió
 
@@ -157,18 +154,6 @@ Sortida esperada:
 ✅ Usuari creat correctament.
 ```
 
-### 🔑 Mostrar token
-
-```bash
-$ ./iredapi_manager.py token
-```
-
-Sortida esperada: 
-
-```bash
-✅ Token actual 🔑 : tejD1VUv...
-```
-
 ### 🚪 Tancar sessió
 ```bash
 # Esborra sessió usant els fitxers per defecte
@@ -177,14 +162,13 @@ $ ./iredapi_manager.py logout
 
 ```bash
 # Esborra fitxers personalitzats de sessió
-$ ./iredapi_manager.py logout -t /tmp/token_admin -c /tmp/cookies_admin.txt
+$ ./iredapi_manager.py logout -c /tmp/cookies_admin.txt
 ```
 
 Sortida esperada: 
 
 ```bash
 ✅ Fitxer de cookies eliminat.
-✅ Fitxer de token eliminat.
 👋 Sessió tancada.
 ```
 
@@ -204,7 +188,7 @@ export IREDAPI_INSECURE=1
 export IREDAPI_DEBUG=1
 
 # 🔐 mostra els valors sensibles:
-# SENSITIVE_KEYS = {'password', 'api_token', 'session_id', 'token'}
+# SENSITIVE_KEYS = {'password', 'api_token', 'session_id', ...}
 export IREDAPI_MASK_SENSITIVE=0
 ```
 
@@ -237,7 +221,7 @@ Sortida esperada:
   }
 }
 ```
-(amb `IREDAPI_DEBUG=1` també veuries línies amb `[DEBUG]` sobre l’URL, token, etc.)
+(amb `IREDAPI_DEBUG=1` també veuries línies amb `[DEBUG]` sobre l’URL, etc.)
 
 ### ℹ️ Ajuda
 Consulta totes les opcions amb:
@@ -248,7 +232,7 @@ $ ./iredapi_manager.py --help
 Sortida esperada: 
 
 ```bash
-usage: iredapi [-h] [-r] [--show-secrets] {login,call,logout,token,session} ...
+usage: iredapi [-h] [-r] [--show-secrets] {login,call,logout,session} ...
 
 🔐 CLI per a l'API iRedAdmin
 
@@ -262,11 +246,10 @@ optional arguments:
   --show-secrets        Mostra valors sensibles com API token, contrasenyes, etc.
 
 Subcomandes:
-  {login,call,logout,token,session}
+  {login,call,logout,session}
     login               Iniciar sessió i desa cookies
     call                Fer una crida a l'API
-    logout              Esborra el fitxer de cookies i de token
-    token               Mostra el token desat
+    logout              Esborra el fitxer de cookies
     session             Mostrar informació de sessió actual (autenticació opcional si no hi ha sessió)
 
 Per a més ajuda, usa --help o ajuda subcomanda.
@@ -294,7 +277,7 @@ IREDAPI_INSECURE=1
 # Mostra missatges de depuració detallats (Logger.debug)
 IREDAPI_DEBUG=1
 
-# Mostra dades sensibles definides a SENSITIVE_KEYS = {'password', 'api_token', 'session_id', 'token'}
+# Mostra dades sensibles definides a SENSITIVE_KEYS = {'password', 'api_token', 'session_id'}
 IREDAPI_MASK_SENSITIVE=0
 ```
 

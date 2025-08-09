@@ -26,14 +26,13 @@ from http.cookiejar import MozillaCookieJar
 from collections import OrderedDict
 
 API_BASE = os.getenv('IREDAPI_URL', 'https://localhost/iredadmin/api')
-TOKEN_FILE = os.path.expanduser('~/.iredapi_token')
 COOKIE_FILE = os.path.expanduser('~/.iredapi_cookies.txt')
 # Detectar RAW mode via variable d'entorn
 RAW_MODE = os.getenv('IREDAPI_RAW', '0') == '1'
 DEBUG_ENABLED = os.getenv('IREDAPI_DEBUG', '0') == '1'
 MASK_SENSITIVE_DATA = os.getenv('IREDAPI_MASK_SENSITIVE', '1') != '0'  # per defecte, amaga dades sensibles
 # Nota: != '0' perquè quan és '0', no volem fer masking si també s'afegeix --show-secrets.
-SENSITIVE_KEYS = {'password', 'api_token', 'session_id', 'token'}
+SENSITIVE_KEYS = {'password', 'api_token', 'session_id'}
 SPINNER_START_ICON = "🚗" # "🚀" "✈️" "🚗" "🏎️" "📡"
 SPINNER_END_ICON = "🏁" # "🛬" "🎯"
 
@@ -264,11 +263,10 @@ class Spinner:
 
 class SessionManager:
     """
-    Gestiona la sessió de l'usuari: token, cookies, headers i credencials.
-    Permet guardar i carregar tokens i cookies per mantenir autenticació persistent.
+    Gestiona la sessió de l'usuari: cookies, headers i credencials.
+    Permet guardar i carregar cookies per mantenir autenticació persistent.
     """
-    def __init__(self, token_file=TOKEN_FILE , cookie_file=COOKIE_FILE):
-        self.token_file = token_file
+    def __init__(self, cookie_file=COOKIE_FILE):
         self.cookie_file = cookie_file
         
     def _log_cookie_jar(self, jar):
@@ -282,14 +280,6 @@ class SessionManager:
                 log_debug(f"{prefix}{c.name} = {c.value} {domain}", 2)
         else:
             Logger.warning("Cap cookie disponible al jar.")
-
-    def _log_token(self, token: Optional[str]):
-        if token:
-            log_debug("🔑 Token carregat de la sessió actual", 2)
-            display_token = token if not MASK_SENSITIVE_DATA else f"{token[:6]}...{token[-4:]}"
-            log_debug(f"└─ Bearer {display_token}", 2)
-        else:
-            Logger.warning("⚠️ No s'ha trobat cap token d'autenticació.")
 
     def _log_credentials(self, args):
         log_debug(f"👤 Usuari: {args.username}, 🔑 Contrasenya: {'*' * len(args.password or '')}", 2)
@@ -354,51 +344,7 @@ class SessionManager:
                 log_debug(f"❌ No s'han pogut carregar les cookies: {e}", 2)
                 return False
         return False
-    
-    def save_token(self, token):
-        try:
-            with open(self.token_file, 'w') as f:
-                f.write(token)
-            os.chmod(self.token_file, 0o600)
-            self._log_token(token)
-        except Exception as e:
-            Logger.error(f"No s'ha pogut guardar el token: {e}")
 
-    def load_token(self):
-        """📥 Carrega el token des del fitxer, si existeix i és vàlid."""
-        try:
-            if not os.path.exists(self.token_file):
-                return None
-            with open(self.token_file, 'r') as f:
-                token = f.read().strip()
-                if token and len(token) > 10:
-                    return token
-                else:
-                    log_debug("⚠️ Token buit o massa curt.")
-        except Exception as e:
-            log_debug(f"❌ Error llegint el token: {e}")
-        return None
-
-    def delete_token(self, path=None):
-        path = path or self.token_file
-        try:
-            os.remove(path)
-            log_debug(f"🗑️  Fitxer de token '{path}' eliminat.")
-            return True, None
-        except FileNotFoundError:
-            log_debug(f"📄❓ Fitxer de token '{path}' no existeix.")
-            return True, None
-        except Exception as e:
-            return False, f"[delete_token] {e}"
-
-    def token_exists(self):
-        """🧪 Retorna True si hi ha un token vàlid i registrable."""
-        token = self.load_token()
-        if token:
-            self._log_token(token)
-            return True
-        return False
-        
     def ensure_credentials(self, args):
         # ❌ Si no som en entorn interactiu i falten credencials, no podem continuar
         if not sys.stdin.isatty(): 
@@ -423,19 +369,8 @@ class SessionManager:
         self._log_credentials(args)
         return True
 
-    def get_auth_headers(self, args, include_content_type=True, requires_token=True):
+    def get_auth_headers(self, args, include_content_type=True):
         headers = {"Accept": "application/json"}
-
-        if requires_token and self.token_exists():
-            token = self.load_token()
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-                self._log_token(token)
-            else:
-                Logger.warning("⚠️ Token invàlid o buit tot i existir el fitxer.")
-        elif requires_token:
-            Logger.warning("⚠️ No s'ha trobat cap token vàlid.")
-        
         if include_content_type:
             headers["Content-Type"] = "application/json"
 
@@ -452,9 +387,9 @@ class SessionManager:
         :param args: Arguments CLI, opcional per més context (raw, debug...)
         :return: True si sembla que la sessió ha expirat
         """
-        # if not resp:
-        #     log_debug("❗ Resposta buida: no es pot comprovar si la sessió ha expirat.", 2)
-        #     return True
+        if resp is None:
+            log_debug("❗ Resposta buida: no es pot comprovar si la sessió ha expirat.", 2)
+            return True
         
         # 🔁 Redirecció a pàgina de login
         if resp.status_code in (301, 302, 303):
@@ -480,22 +415,23 @@ class SessionManager:
             try:
                 data = resp.json()
                 if isinstance(data, dict):
-                    message = str(data.get("message", "")).lower()
-                    if "expired" in message or "unauthorized" in message:
-                        log_debug(f"📭 Missatge JSON d'error: {message}", 2)
-                        return True
+                    if data.get("_success") is False:
+                        msg = data.get("_msg", "").lower()
+                        if "303 see other" in msg or "expired" in msg or "unauthorized" in msg:
+                            log_debug(f"📭 Missatge JSON indica sessió caducada: {msg}", 2)
+                            return True
             except Exception as e:
                 log_debug(f"❌ No s'ha pogut parsejar JSON: {type(e).__name__}: {e}", 2)
 
-        # 🔎 Si tot ha fallat, considerem que la sessió és vàlida
-        log_debug(f"🌐 Resposta: {resp.status_code} {resp.reason}", 2)
+        # 🔎 Si no s'ha detectat res sospitós, assumim que la sessió és vàlida
+        log_debug(f"🌐 Resposta HTTP OK: {resp.status_code} {resp.reason}", 2)
         return False
 
     def is_session_valid(self) -> bool:
-        return self.cookie_exists() or self.token_exists()
+        return self.cookie_exists()
 
     def handle_session_expired(self, args, method, url, headers, data_to_send, verify):
-        log_debug("🕒 Sessió caducada: esborrem token i cookies. Cal tornar a fer login.")
+        log_debug("🕒 Sessió caducada: esborrem cookies. Cal tornar a fer login.")
 
         success, errors = self.clear_session()
         if not success:
@@ -510,7 +446,7 @@ class SessionManager:
         Logger.info("Sessió iniciada correctament. Reintentant la crida 🔁...")
 
         # 🔁 Torna a carregar headers i cookies després del login
-        headers = self.get_auth_headers(args, include_content_type=True, requires_token=True)
+        headers = self.get_auth_headers(args, include_content_type=True)
         cookies = self.load_cookie()
 
         try:
@@ -528,15 +464,10 @@ class SessionManager:
             log_error(f"[handle_session_expired] No s'ha pogut repetir la crida: {e}", raw=args.raw)
             return None
 
-    def clear_session(self, token_path=None, cookie_path=None):
+    def clear_session(self, cookie_path=None):
 
         success = True
         errors = []
-
-        ok_token, err_token = self.delete_token(token_path)
-        if not ok_token:
-            success = False
-            errors.append(err_token)
 
         ok_cookie, err_cookie = self.delete_cookie(cookie_path)
         if not ok_cookie:
@@ -555,44 +486,8 @@ def should_skip_ssl_verification(args):
     # Ignora errors SSL si --insecure o variable d'entorn IREDAPI_INSECURE=1
     return args.insecure or os.getenv('IREDAPI_INSECURE') == '1'
 
-def cmd_show_token(args):
-    cookies_file = args.cookies
-    raw = getattr(args, 'raw', False)
-
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE) as f:
-            token = f.read().strip()
-        if raw:
-            JsonFormatter(raw=raw).show((True, {'_data': token}))
-        else:
-            Logger.success(f"Token actual 🔒 : {token}")
-        return
-
-    if os.path.exists(cookies_file):
-        try:
-            session_cookies = MozillaCookieJar(cookies_file)
-            session_cookies.load(ignore_discard=True, ignore_expires=True)
-        except Exception as e:
-            log_error(f"Error llegint cookies: {e}", raw=args.raw)
-            return
-
-        try:
-            resp = requests.get(f"{args.url}/session-info", cookies=session_cookies, verify=False)
-            data = resp.json()
-            token = data.get('api_token') or data.get('_data', {}).get('api_token')
-
-            if token:
-                Logger.success(f"Token de sessió 🔑: {token}", raw=args.raw)
-            else:
-                log_error(f"Cap token trobat a la sessió.", raw=args.raw)
-        except Exception as e:
-            log_error(f"Error llegint token de sessió: {e}", raw=args.raw)
-    else:
-        log_error(f"No s'ha trobat cap token desat. Fes login primer.", raw=args.raw)
-
 def cmd_logout(args, session_mgr):
     success, errors = session_mgr.clear_session(
-        token_path=args.token,
         cookie_path=args.cookies
     )
 
@@ -632,14 +527,14 @@ def cmd_login(args, session_mgr):
     #if payload.get('_success') and payload.get('_data', {}).get('api_token'):
     if payload.get('_success') and '_data' in payload: 
         session_mgr.save_cookie(resp, domain=args.url.split('//')[-1].split('/')[0])  # extreu domini
-        if  'api_token' in payload['_data']:
-            api_token = payload['_data']['api_token']
-            session_mgr.save_token(api_token)
+        # if  'api_token' in payload['_data']:
+        #     api_token = payload['_data']['api_token']
+        #     session_mgr.save_token(api_token)
         
         if args.raw:
             JsonFormatter(raw=args.raw).show((True, {'_msg': payload['_msg'], '_data': payload['_data']}))
         else:
-            Logger.success("Login correcte. Sessió i Token guardats.")
+            Logger.success("Login correcte. Sessió i cookie guardats.")
         return True  # ✅ Login correcte
     else:
         msg= f"Error d'autenticació: {payload.get('_msg', 'Error desconegut')}"
@@ -650,7 +545,7 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
     """
         Fa una crida HTTP autenticada a l'API i gestiona errors com sessió expirada o credencials no vàlides.
         
-        :param args: Arguments d'entrada amb opcionalment token, username, password, raw, etc.
+        :param args: Arguments d'entrada amb opcionalment username, password, raw, etc.
         :param session_mgr: Instància de SessionManager
         :param url: URL completa o parcial (es resoldrà si cal)
         :param method: Mètode HTTP ("GET", "POST", etc.)
@@ -673,9 +568,7 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
             return None
     
     # 🛂 Construïm capçaleres d'autenticació
-    #    → Si és sessió amb token: s'inclou "Authorization: Bearer ..."
-    #    → Si només fem servir cookies: no s'inclou token si internal=True
-    headers = session_mgr.get_auth_headers(args, include_content_type=True, requires_token=not internal)
+    headers = session_mgr.get_auth_headers(args, include_content_type=True)
     log_debug(f"🌐 Iniciant crida url={url}, method={method}, headers={headers}, internal={internal}...")
 
     # 📦 Prepara el cos de la petició
@@ -800,7 +693,7 @@ def main():
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument('-r', '--raw', action='store_true', help='Sortida RAW sense colors')
-    parser.add_argument('--show-secrets', action='store_true', help='Mostra valors sensibles com API token, contrasenyes, etc.')
+    parser.add_argument('--show-secrets', action='store_true', help='Mostra valors sensibles com contrasenyes, etc.')
     parser.set_defaults(func=lambda args: parser.print_help())
 
     subparsers = parser.add_subparsers(title='Subcomandes',dest='command')
@@ -814,21 +707,13 @@ def main():
     call_parser.add_argument('-d', '--data', help='Dades a enviar en POST/PUT/PATCH (format text o JSON)')
     call_parser.set_defaults(func=cmd_call)
 
-    logout_parser = subparsers.add_parser('logout', help='Esborra el fitxer de cookies i de token')
+    logout_parser = subparsers.add_parser('logout', help='Esborra el fitxer de cookies')
     logout_parser.add_argument(
         '--cookies', '-c',
         default=COOKIE_FILE,
         help='Fitxer de cookies a esborrar (per defecte: %(default)s)'
     )
-    logout_parser.add_argument(
-        '--token', '-t',
-        default=TOKEN_FILE,
-        help='Fitxer de token a esborrar (per defecte: %(default)s)'
-    )
     logout_parser.set_defaults(func=cmd_logout)
-
-    token_parser = subparsers.add_parser('token', help='Mostra el token desat', parents=[common_parser, auth_parser])
-    token_parser.set_defaults(func=cmd_show_token)
     
     session_parser = subparsers.add_parser('session', help='Mostrar informació de sessió actual (autenticació opcional si no hi ha sessió)', parents=[common_parser, auth_parser])
     session_parser.add_argument('-d', '--data', help='Dades a enviar en JSON o text (opcional)', default=None) 

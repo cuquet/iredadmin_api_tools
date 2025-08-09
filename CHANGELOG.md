@@ -80,3 +80,12 @@ All notable changes to this project will be documented in this file.
 - Improve error handling and logging consistency in session operations.
 - Update README to reflect changes in logout functionality and session management.
 
+## 🔖 v0.17.1 
+
+Refactor error logging to use log_error function for consistency and clarity
+
+## 🔖 v0.18 
+
+Refactor session expiration check and improve JSON error handling in SessionManager
+
+
