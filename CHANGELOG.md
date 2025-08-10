@@ -69,6 +69,12 @@ All notable changes to this project will be documented in this file.
 - Enhanced SessionManager with better cookie and token management.
 - Improved error handling and user feedback during login and session operations.
 
+## 🔖 🔖-v0.15.1 
+
+🔖 v0.15.1: Refactor session management:
+- Replace Logger calls with log_debug for improved logging consistency
+- Add cookie_exists and is_session_valid methods
+
 ## 🔖 v0.15.1 🔖 v0.15.1: Refactor session management:
 - Replace Logger calls with log_debug for improved logging consistency
 - Add cookie_exists and is_session_valid methods
@@ -88,4 +94,7 @@ Refactor error logging to use log_error function for consistency and clarity
 
 Refactor session expiration check and improve JSON error handling in SessionManager
 
+## 🔖 v0.19 
+
+🔖 v0.19: Refactor request handling in SessionManager: consolidate header and data preparation into get_request_kwargs method
 

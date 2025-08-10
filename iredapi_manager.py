@@ -369,12 +369,55 @@ class SessionManager:
         self._log_credentials(args)
         return True
 
-    def get_auth_headers(self, args, include_content_type=True):
+    def get_request_kwargs(self, args, method, data=None):
+        method = method.upper()
         headers = {"Accept": "application/json"}
-        if include_content_type:
-            headers["Content-Type"] = "application/json"
 
-        return headers
+        request_kwargs = {
+            "method": method,
+            "headers": headers,
+        }
+        
+        raw_data = data if data is not None else getattr(args, "data", None)
+        # Decideix on posar les dades segons mètode
+        if method in ("GET", "DELETE"):
+            # Parsejar cadena 'a=1&b=2' a dict per params però primer mira de carregar JSON
+            if raw_data:
+                try:
+                    # Prova JSON
+                    json_obj = json.loads(raw_data)
+                    if isinstance(json_obj, dict):
+                        request_kwargs["params"] = json_obj
+                    else:
+                        # No dict: fallback a parsejar form-urlencoded
+                        request_kwargs["params"] = dict(
+                            item.split("=", 1) for item in raw_data.split("&") if "=" in item
+                        )
+                except Exception:
+                    # No JSON, parseja form-urlencoded
+                    try:
+                        request_kwargs["params"] = dict(
+                            item.split("=", 1) for item in raw_data.split("&") if "=" in item
+                        )
+                    except Exception:
+                        request_kwargs["params"] = None
+            else:
+                request_kwargs["params"] = None
+        else:
+            # POST, PUT, PATCH → cos
+            if raw_data:
+                # Prova si és JSON, i posa Content-Type
+                try:
+                    json_obj = json.loads(raw_data)
+                    headers["Content-Type"] = "application/json"
+                    request_kwargs["data"] = json.dumps(json_obj).encode("utf-8")
+                except Exception:
+                    headers["Content-Type"] = "application/x-www-form-urlencoded"
+                    request_kwargs["data"] = raw_data.encode("utf-8")
+            else:
+                request_kwargs["data"] = None
+
+        return request_kwargs, headers
 
     def is_session_expired(self, resp) -> bool:
         """
@@ -446,19 +489,15 @@ class SessionManager:
         Logger.info("Sessió iniciada correctament. Reintentant la crida 🔁...")
 
         # 🔁 Torna a carregar headers i cookies després del login
-        headers = self.get_auth_headers(args, include_content_type=True)
-        cookies = self.load_cookie()
-
+        req_kwargs = self.get_request_kwargs(args, method, data_to_send)
+        req_kwargs.update({
+            "url": url,
+            "verify": verify,
+            "cookies": self.load_cookie(),
+            "allow_redirects": False,
+        })
         try:
-            response = requests.request(
-                method,
-                url,
-                headers=headers,
-                data=data_to_send,
-                verify=verify,
-                cookies=cookies,
-                allow_redirects=False
-            )
+            response = requests.request(**req_kwargs)
             return response
         except requests.exceptions.RequestException as e:
             log_error(f"[handle_session_expired] No s'ha pogut repetir la crida: {e}", raw=args.raw)
@@ -505,11 +544,12 @@ def cmd_login(args, session_mgr):
     
     url = f"{args.url}/login"
     payload = {'username': args.username, 'password': args.password}
+    payload_json = json.dumps(payload)
 
     spinner = Spinner("Cridant a l'API...", "Fet!", raw=args.raw)
     spinner.start()
     try:
-        resp = cmd_call(args, session_mgr, url=url, method='POST', data=payload, internal=True)
+        resp = cmd_call(args, session_mgr, url=url, method='POST', data=payload_json, internal=True)
     except Exception as e:
         spinner.stop()
         log_error(f"Error durant l'autenticació: {str(e)}", raw=args.raw)
@@ -567,22 +607,20 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
             log_error(f"No s'ha pogut iniciar sessió.", raw=args.raw)
             return None
     
-    # 🛂 Construïm capçaleres d'autenticació
-    headers = session_mgr.get_auth_headers(args, include_content_type=True)
-    log_debug(f"🌐 Iniciant crida url={url}, method={method}, headers={headers}, internal={internal}...")
+    request_kwargs, headers = session_mgr.get_request_kwargs(args, method, data)
 
     # 📦 Prepara el cos de la petició
-    payload = None
-    if data is None and args.data:
-        try:
-            json_data = json.loads(args.data)
-            payload = json.dumps(json_data).encode('utf-8')
-        except ValueError:
-            payload = args.data.encode('utf-8')
-            headers['Content-Type'] = 'text/plain'
-    elif data is not None:
-        payload = json.dumps(data).encode('utf-8')
-
+    request_kwargs.update({
+        "url": url,
+        "verify": verify,
+        "cookies": session_mgr.load_cookie() if not internal else None,
+        "allow_redirects": True
+    })
+    # 🛂 Construïm capçaleres d'autenticació
+    request_kwargs["headers"] = headers
+    
+    log_debug(f"🌐 Iniciant crida url={request_kwargs['url']}, method={request_kwargs['method']}, headers={request_kwargs['headers']}, internal={internal}...")
+    
     # ⏳ Spinner si no és crida interna
     spinner = Spinner("Cridant a l'API...", "Fet!", raw=args.raw) if not internal else None
     if spinner:
@@ -597,15 +635,7 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
                 log_debug(f"🔁 Intent {attempt + 1}/{max_retries}")
                 # 🌐 Crida HTTP amb autenticació:
                 #    - Si s'utilitzen cookies, s'inclouen automàticament via `session_mgr.load_cookie()`
-                resp = requests.request(
-                    method, 
-                    url, 
-                    headers=headers, 
-                    data=payload, 
-                    verify=verify, 
-                    cookies=session_mgr.load_cookie() if not internal else None, 
-                    allow_redirects=True
-                )
+                resp = requests.request(**request_kwargs)
                 
                 # 🕒 Si la sessió ha caducat (ex: redirecció 303 → login page), intenta renovar-la
                 if session_mgr.is_session_expired(resp):
@@ -613,7 +643,7 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
                     Logger.warning("[cmd_call] Sessió caducada 🕒. Reintentant amb nou login...")
                     
                     # 🔁 Intenta reiniciar la sessió i repetir la crida
-                    resp = session_mgr.handle_session_expired(args, method, url, headers, payload, verify)
+                    resp = session_mgr.handle_session_expired(args, method, url, headers, request_kwargs.get("data"), verify)
                     if not resp:
                         log_error("Error al reintentar després de renovar la sessió.", raw=args.raw)
                         return None
@@ -639,7 +669,7 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
             spinner.stop()
         log_debug(f"🌐 Resposta: {resp.status_code} {resp.reason}" if resp else "🌐 No s'ha rebut cap resposta HTTP")
     if resp is None:
-        log_error("[cmd_call] No s'ha rebut cap resposta HTTP.", raw=args.raw)
+        log_error("No s'ha rebut cap resposta HTTP.", raw=args.raw)
         return None
 
     # 📄 Intenta interpretar resposta com JSON
@@ -653,8 +683,6 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
     return resp if internal else JsonFormatter(raw=args.raw).show(content)
 
 def cmd_session(args, session_mgr):
-    log_error("Aquest és un missatge d'error de prova", raw=False)  # Format normal, amb colors i símbols
-    log_error("Aquest és un missatge d'error de prova en raw", raw=True)  # Format JSON cru
     # Fer la crida a l'API per obtenir informació de la sessió
     cmd_call(
         args, 
