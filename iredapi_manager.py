@@ -423,7 +423,9 @@ class SessionManager:
         """
         Detecta si la sessió ha expirat basant-se en:
         - Redireccions (ex: 302/303) cap a pàgines de login
-        - Codis 401/403 quan cal autenticació
+        - Codi 401(401 Unauthorized) quan cal autenticació (Sessió caducada / cookie expirada)
+            403 Forbidden s’utilitza quan sí que estàs identificat, però no tens permís per 
+            accedir al recurs.
         - Contingut HTML o JSON que suggereix expiració de sessió
 
         :param resp: L'objecte requests.Response
@@ -442,7 +444,7 @@ class SessionManager:
                 return True
         
         # 🔒 Resposta que indica falta d'autenticació
-        if resp.status_code in (401, 403):
+        if resp.status_code in (401,):
             log_debug(f"🔒 Resposta amb status {resp.status_code} → probablement sessió expirada.", 2)
             return True
         
