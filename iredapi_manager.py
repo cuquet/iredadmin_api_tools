@@ -148,32 +148,37 @@ class JsonFormatter:
         """
         Processa tuples o dicts per mostrar-los com JSON formatat,
         amb o sense colors, i sense claus buides.
+        Admet les claus: _success, _msg, _data, _meta
         """
+        accepted_keys = ['_success', '_msg', '_data', '_meta']
+        d = OrderedDict()
+        
         try:
+            # Normalitzem result a dict
             if isinstance(result, tuple):
                 success, *rest = result
-                d = OrderedDict({'_success': success})
-                if rest:
-                    extra = rest[0]
-                    if isinstance(extra, dict):
-                        if '_msg' in extra and extra['_msg'] is not None:
-                            d['_msg'] = extra['_msg']
-                        if '_data' in extra and extra['_data'] is not None:
-                            d['_data'] = extra['_data']
-                    elif isinstance(extra, str):
-                        d['_msg'] = extra
-            elif isinstance(result, dict):
-                # Construïm un diccionari ordenat amb només les claus rellevants i en l'ordre desitjat
-                d = OrderedDict()
-                success = result.get('_success', True)
                 d['_success'] = success
-                if '_msg' in result and result['_msg'] is not None:
-                    d['_msg'] = result['_msg']
-                if '_data' in result and result['_data'] is not None:
-                    d['_data'] = result['_data']
+                if rest and isinstance(rest[0], dict):
+                    source = rest[0]
+                elif rest and isinstance(rest[0], str):
+                    d['_msg'] = rest[0]
+                    source = {}
+                else:
+                    source = {}
+            elif isinstance(result, dict):
+                source = result
+                d['_success'] = result.get('_success', True)
             else:
-                d = OrderedDict({'_success': False, '_msg': 'Format de dades no suportat'})
                 log_debug(f"JsonFormatter.format: format no suportat: {type(result)} -> {repr(result)}")
+                return OrderedDict({'_success': False, '_msg': 'Format de dades no suportat'})
+
+            # Afegim les claus rellevants si existeixen i no són None
+            for key in accepted_keys:
+                if key == '_success':
+                    continue  # ja afegit
+                if key in source and source[key] is not None:
+                    d[key] = source[key]
+
         except Exception as e:
             log_debug(f"❌ Error processant dades: {type(e)} -> {e}")
             d = OrderedDict({'_success': False, '_msg': f'Error processant dades: {str(e)}'})
