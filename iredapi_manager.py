@@ -496,13 +496,14 @@ class SessionManager:
         Logger.info("Sessió iniciada correctament. Reintentant la crida 🔁...")
 
         # 🔁 Torna a carregar headers i cookies després del login
-        req_kwargs = self.get_request_kwargs(args, method, data_to_send)
+        req_kwargs, headers_new = self.get_request_kwargs(args, method, data_to_send)
         req_kwargs.update({
             "url": url,
             "verify": verify,
             "cookies": self.load_cookie(),
             "allow_redirects": False,
         })
+        req_kwargs["headers"] = headers_new
         try:
             response = requests.request(**req_kwargs)
             return response

@@ -305,6 +305,42 @@ $ unset IREDAPI_RAW
 $ unset IREDAPI_INSECURE
 $ unset IREDAPI_DEBUG
 ```
+
+## 🧪 Exemple de test amb `iredapi_manager.py`:
+### 📊 Política efectiva
+***GET*** /api/spampolicy/effective/<email|@domain|@.>
+
+Primer cal fer `login` per obtenir la cookie de la sessió
+Aquesta ordre CLI Retorna informació segons la prioritat ( usuari > domini > global)
+```bash
+$ ./iredapi_manager.py call -e /spampolicy/effective/<EMAIL>
+```
+retorna:
+```bash
+{
+  "_success": True,
+  "_data": {
+    "policy_name": "@melindro.org",
+    "effectivebypriority": "domain",  # 👉 l'usuari no té política i aplica prioritat, `<DOMINI>
+    ...
+```
+
+
+### 🔍 Exemple de test amb curl:
+1. Format JSON per 🔐 Autenticació:
+```bash
+curl -k -X POST https://localhost/iredadmin/api/login \
+     -H "Content-Type: application/json" \
+     -d '{"username": "user@domain.com", "password": "<...>" }'
+```
+1. Format form-urlencoded per 🔐 Autenticació:
+```bash
+curl -k -X POST https://localhost/iredadmin/api/login \
+     -d "username=user@domain.com&password=<...>" \
+     -c ~/.iredapi_cookies.txt
+```
+
+
 ### ℹ️ Notes
 Les variables de `.env` tenen efecte mentre la terminal estigui oberta o fins que facis unset.
 
