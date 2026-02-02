@@ -24,9 +24,7 @@ Thumbs.db
 # Fitxers de sessió/autenticació
 *.token
 *.cookies.txt
-iredapi_token
 iredapi_cookies.txt
-~/.iredapi_token
 ~/.iredapi_cookies.txt
 
 # Versions antigues (ja guardades a l'historial de Git)

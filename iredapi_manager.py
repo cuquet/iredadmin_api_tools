@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# iredapi_manager.py
+# api/tools/iredapi_manager.py
 import os
 import sys
 import json
@@ -11,7 +11,21 @@ import threading
 import requests
 from typing import Optional
 import shutil
-from wcwidth import wcswidth
+try:
+    from wcwidth import wcswidth
+except ImportError:
+    def wcswidth(s):
+        # Fallback si no hi ha wcwidth: 
+        # La majoria d'emojis moderns ocupen 2 espais, la resta 1.
+        import unicodedata
+        width = 0
+        for char in s:
+            # 'W' (Wide) i 'F' (Fullwidth) ocupen 2 espais
+            if unicodedata.east_asian_width(char) in ('W', 'F'):
+                width += 2
+            else:
+                width += 1
+        return width
 
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -32,7 +46,7 @@ RAW_MODE = os.getenv('IREDAPI_RAW', '0') == '1'
 DEBUG_ENABLED = os.getenv('IREDAPI_DEBUG', '0') == '1'
 MASK_SENSITIVE_DATA = os.getenv('IREDAPI_MASK_SENSITIVE', '1') != '0'  # per defecte, amaga dades sensibles
 # Nota: != '0' perquè quan és '0', no volem fer masking si també s'afegeix --show-secrets.
-SENSITIVE_KEYS = {'password', 'api_token', 'session_id'}
+SENSITIVE_KEYS = {'password', '2FA_required', 'session_id'}
 SPINNER_START_ICON = "🚗" # "🚀" "✈️" "🚗" "🏎️" "📡"
 SPINNER_END_ICON = "🏁" # "🛬" "🎯"
 
@@ -209,61 +223,34 @@ class Spinner:
 
         # Caràcters d'animació
         self.frames = ["|", "/", "-", "\\"]
-        self.frame_index = 0
 
         # Altres paràmetres d'estat
         self._stop_event = threading.Event()
         self._thread = None
-        self.columns = shutil.get_terminal_size().columns
-
-    def _full_line(self, text, symbol):
-        """Construeix una línia completa amb text + símbol, padding fins omplir terminal."""
-        full_text = f"{text} {symbol}"
-        width = wcswidth(full_text)
-        padding = max(0, self.columns - width)
-        return f"{full_text}{' ' * padding}"
 
     def _spinner_task(self):
+        idx = 0
         while not self._stop_event.is_set():
-            symbol = self.frames[self.frame_index]
-            self.frame_index = (self.frame_index + 1) % len(self.frames)
-            line = self._full_line(self.text_start, symbol)
-            sys.stdout.write(f"\r\033[96m{line}\033[0m")  # Cyan + Reset
+            symbol = self.frames[idx % len(self.frames)]
+            # \r: inici de línia | \033[K: esborra fins al final de la línia
+            sys.stdout.write(f"\r\033[96m{self.text_start} {symbol}\033[0m\033[K")  # Cyan + Reset
             sys.stdout.flush()
+            idx += 1
             time.sleep(self.delay)
 
     def start(self):
+        if self.raw: return
         self._stop_event.clear()
-        if self.raw:
-            # Mostra línia inicial però no anima
-            symbol = self.frames[self.frame_index]
-            line = self._full_line(self.text_start, symbol)
-            sys.stdout.write(f"\r\033[96m{line}\033[0m")
-            sys.stdout.flush()
-        else:
-            self._thread = threading.Thread(target=self._spinner_task)
-            self._thread.start()
+        self._thread = threading.Thread(target=self._spinner_task, daemon=True)
+        self._thread.start()
 
     def stop(self):
+        if self.raw: return
         self._stop_event.set()
-
-        if self.raw:
-            # Sobreescriu línia amb el missatge final
-            line = self._full_line(self.text_end, "✅")
-            sys.stdout.write(f"\r{line}\n")
-            sys.stdout.flush()
-        else:
-            if self._thread:
-                self._thread.join()
-            # Esborra línia anterior
-            sys.stdout.write("\r" + " " * self.columns + "\r")
-            sys.stdout.flush()
-            self._print_done()
-
-    def _print_done(self):
-        """Mostra el missatge final amb ✅, alineat completament."""
-        line = self._full_line(self.text_end, "✅")
-        sys.stdout.write(f"\033[96m{line}\033[0m\n")
+        if self._thread:
+            self._thread.join()
+        # Netegem la línia i posem el missatge final
+        sys.stdout.write(f"\r\033[96m{self.text_end} ✅\033[0m\033[K\n")
         sys.stdout.flush()
 
 class SessionManager:
@@ -756,6 +743,10 @@ def main():
     session_parser.set_defaults(func=cmd_session)
 
     args = parser.parse_args()
+    # Autodetecció de terminal: si no és interactiva, forcem RAW
+    if not sys.stdout.isatty():
+        args.raw = True
+    
     if not args.command:
         parser.print_help()
         sys.exit(1)
@@ -778,6 +769,9 @@ def main():
             args.func(args, session_mgr)
         else:
             args.func(args)
+    except KeyboardInterrupt:
+        print("\nAbortat per l'usuari.")
+        sys.exit(130)
     except Exception as e:
         Logger.error(f"Error inesperat: {e}")
         sys.exit(2)

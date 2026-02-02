@@ -31,7 +31,7 @@
   - `IREDAPI_URL`: URL base de l’API (per defecte: `https://localhost/iredadmin/api`)
   - `IREDAPI_RAW=1`: activa mode RAW per defecte
   - `IREDAPI_INSECURE=1`: ignora errors SSL
-  - `IREDAPI_MASK_SENSITIVE=0`: Mostra claus sensibles (com api_token, password, etc.)
+  - `IREDAPI_MASK_SENSITIVE=0`: Mostra claus sensibles (password, etc.)
   - `IREDAPI_DEBUG=1`: mostra missatges `Logger.debug()` per depuració
    
 | Cas                    | `MASK_SENSITIVE_DATA` | `--show-secrets` | Resultat           |
@@ -79,8 +79,7 @@ Sortida esperada:
       "is_domain_admin": False,
       "is_mail_admin": False,
       "is_user_admin": False,
-      "token_present": True,
-      "api_token": "***",
+      "2FA_required": "***",
   }
 }
 ```
@@ -188,7 +187,7 @@ export IREDAPI_INSECURE=1
 export IREDAPI_DEBUG=1
 
 # 🔐 mostra els valors sensibles:
-# SENSITIVE_KEYS = {'password', 'api_token', 'session_id', ...}
+# SENSITIVE_KEYS = {'password', '2FA_required', 'session_id', ...}
 export IREDAPI_MASK_SENSITIVE=0
 ```
 
@@ -277,7 +276,7 @@ IREDAPI_INSECURE=1
 # Mostra missatges de depuració detallats (Logger.debug)
 IREDAPI_DEBUG=1
 
-# Mostra dades sensibles definides a SENSITIVE_KEYS = {'password', 'api_token', 'session_id'}
+# Mostra dades sensibles definides a SENSITIVE_KEYS = {'password', '2FA_required', 'session_id'}
 IREDAPI_MASK_SENSITIVE=0
 ```
 

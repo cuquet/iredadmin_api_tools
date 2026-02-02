@@ -12,7 +12,7 @@
 - Displays JSON output with syntax highlighting and Unicode symbols
 - Spinner for visual feedback on actions
 - Supports skipping SSL certificate validation (like `curl -k`)
-- Uses local files to store session data (`~/.iredapi_cookies.txt`, `~/.iredapi_token`)
+- Uses local files to store session data (`~/.iredapi_cookies.txt`)
 - URLs, cookie files, and parameters configurable via CLI arguments or environment variables
 
 ## 🔧 Features
@@ -35,7 +35,6 @@
 
 ## 📁 Used Files
 
-- `~/.iredapi_token`: stores authentication token
 - `~/.iredapi_cookies.txt`: stores session cookies
 
 ## 🧪 Examples
