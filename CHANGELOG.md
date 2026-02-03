@@ -98,3 +98,19 @@ Refactor session expiration check and improve JSON error handling in SessionMana
 
 🔖 v0.19: Refactor request handling in SessionManager: consolidate header and data preparation into get_request_kwargs method
 
+## 🔖 v0.19.1 
+
+🔖 v0.19.1: Clarify session expiration detection logic in SessionManager: update comments and restrict status code check to 401 only
+## 🔖 v0.19.2 
+
+🔖 v0.19.2: Refactor JsonFormatter to streamline result processing and enhance key handling
+
+## 🔖 v0.20 
+
+🔖 v0.20: Update request handling in SessionManager to include new headers after login
+
+## 🔖 v0.20.1 
+
+🔖 v0.20.1: Implement 2FA setup and verification commands in iredapi_manager.py
+
+

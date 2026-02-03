@@ -4,13 +4,10 @@ import os
 import sys
 import json
 import argparse
-import textwrap
 import getpass
 import time
 import threading
 import requests
-from typing import Optional
-import shutil
 try:
     from wcwidth import wcswidth
 except ImportError:
@@ -250,7 +247,7 @@ class Spinner:
         if self._thread:
             self._thread.join()
         # Netegem la línia i posem el missatge final
-        sys.stdout.write(f"\r\033[96m{self.text_end} ✅\033[0m\033[K\n")
+        sys.stdout.write(f"\r\033[96m{self.text_end}\033[0m\033[K\n")
         sys.stdout.flush()
 
 class SessionManager:
@@ -515,6 +512,40 @@ class SessionManager:
 
         return success, errors 
 
+class TwoFactorManager:
+    def __init__(self, args, session_mgr):
+        self.args = args
+        self.session_mgr = session_mgr
+
+    def verify(self, otp, cookies=None):
+        target_cookies = cookies or self.session_mgr.load_cookie()
+        spinner = Spinner("Verificant 2FA...", "Verificat!", raw=self.args.raw)
+        spinner.start()
+        try:
+            resp = requests.post(
+                f"{self.args.url}/2fa/verify",
+                json={'totp_code': otp},
+                cookies=target_cookies,
+                verify=not should_skip_ssl_verification(self.args),
+                timeout=10
+            )
+            return resp
+        except Exception as e:
+            log_error(f"Error en la verificació 2FA: {e}", raw=self.args.raw)
+            return None
+        finally:
+            spinner.stop()
+
+    def show_credentials(self, data):
+        if not data: return
+        print(f"\n🔑 Secret: {AnsiColor.CYAN}{data.get('secret')}{AnsiColor.RESET}")
+        print(f"🔗 URI: {AnsiColor.YELLOW}{data.get('uri')}{AnsiColor.RESET}\n")
+        print(data.get('qr_ascii', ''))
+        print("\n" + "-"*30)
+
+    def get_status(self):
+        return cmd_call(self.args, self.session_mgr, url=f"{self.args.url}/2fa/show", 
+                        method='POST', internal=True)
 
 def should_skip_ssl_verification(args):
     # Ignora errors SSL si --insecure o variable d'entorn IREDAPI_INSECURE=1
@@ -537,14 +568,12 @@ def cmd_login(args, session_mgr):
     if not session_mgr.ensure_credentials(args):
         return False
     
-    url = f"{args.url}/login"
-    payload = {'username': args.username, 'password': args.password}
-    payload_json = json.dumps(payload)
+    payload_json = json.dumps({'username': args.username, 'password': args.password})
 
     spinner = Spinner("Cridant a l'API...", "Fet!", raw=args.raw)
     spinner.start()
     try:
-        resp = cmd_call(args, session_mgr, url=url, method='POST', data=payload_json, internal=True)
+        resp = cmd_call(args, session_mgr, url=f"{args.url}/login", method='POST', data=payload_json, internal=True)
     except Exception as e:
         spinner.stop()
         log_error(f"Error durant l'autenticació: {str(e)}", raw=args.raw)
@@ -559,23 +588,28 @@ def cmd_login(args, session_mgr):
         return False
 
     payload = resp.json()
-    #if payload.get('_success') and payload.get('_data', {}).get('api_token'):
-    if payload.get('_success') and '_data' in payload: 
-        session_mgr.save_cookie(resp, domain=args.url.split('//')[-1].split('/')[0])  # extreu domini
-        # if  'api_token' in payload['_data']:
-        #     api_token = payload['_data']['api_token']
-        #     session_mgr.save_token(api_token)
+    if payload.get('_msg') == '2FA_REQUIRED':
+        tfa_mgr = TwoFactorManager(args, session_mgr)
+        Logger.info("🔐 Seguretat: Codi 2FA requerit.")
+        totp = input("Introdueix el codi OTP 🔑 : ")
+        
+        resp = tfa_mgr.verify(totp, resp.cookies)
+        if not resp: return False
+        payload = resp.json()
+    
+    if payload.get('_success') and payload.get('_msg') in ('LOGIN_SUCCESS', '2FA_VERIFIED_SUCCESS'): 
+        tfa_mgr.session_mgr.save_cookie(resp, domain=args.url.split('//')[-1].split('/')[0])  # extreu domini
         
         if args.raw:
             JsonFormatter(raw=args.raw).show((True, {'_msg': payload['_msg'], '_data': payload['_data']}))
         else:
-            Logger.success("Login correcte. Sessió i cookie guardats.")
-        return True  # ✅ Login correcte
+            Logger.success(f"Login correcte ({payload['_msg']}). Sessió guardada.")
+        return True
     else:
         msg= f"Error d'autenticació: {payload.get('_msg', 'Error desconegut')}"
         log_error(msg, raw=args.raw)
-        return False  # ❌ Error d'autenticació
-    
+        return False
+
 def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False):
     """
         Fa una crida HTTP autenticada a l'API i gestiona errors com sessió expirada o credencials no vàlides.
@@ -608,7 +642,7 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
     request_kwargs.update({
         "url": url,
         "verify": verify,
-        "cookies": session_mgr.load_cookie() if not internal else None,
+        "cookies": session_mgr.load_cookie(), #if not internal else None,
         "allow_redirects": True
     })
     # 🛂 Construïm capçaleres d'autenticació
@@ -688,6 +722,84 @@ def cmd_session(args, session_mgr):
         internal=False
     )
 
+def cmd_2fa_setup(args, session_mgr):
+    tfa_mgr = TwoFactorManager(args, session_mgr)
+    resp = cmd_call(
+        args,
+        tfa_mgr.session_mgr,
+        url=f"{args.url}/2fa/setup",
+        method='POST', 
+        internal=True
+        )
+    
+    if not resp:
+        return
+    
+    payload = resp.json()
+    if payload.get('_success'):
+        Logger.success("2FA configurat correctament al servidor.")
+
+        data = payload.get('_data', {})
+        tfa_mgr.show_credentials(data)
+        
+        Logger.info("Verifiquem que la teva App funciona correctament.")
+        otp = input("Introdueix el codi que apareix a la teva App 🔑 : ").strip()
+        if not otp:
+            Logger.warning("Verificació saltada. Assegura't que el secret és correcte.")
+            return
+
+        v_resp = tfa_mgr.verify(otp, resp.cookies)
+        
+        if v_resp and v_resp.json().get('_success'):
+            Logger.success("Configuració validada amb èxit! El teu 2FA és operatiu.")
+        else:
+            Logger.error("El codi no és correcte. Torna a intentar el setup o revisa l'hora del teu sistema.")
+        Logger.info("Recorda desar el secret en un lloc segur.")
+    else:
+        log_error(f"Error: {payload.get('_msg')}")
+
+def cmd_2fa_check(args, session_mgr):
+    tfa_mgr = TwoFactorManager(args, session_mgr)
+    resp = tfa_mgr.get_status()
+    if not resp:
+        Logger.error("No s'ha pogut obtenir info 2FA.")
+        return
+
+    data = resp.json().get('_data', {})
+
+    if not data:
+        Logger.info("🧐 No hem trobat cap configuració 2FA activa per a aquest compte.")
+        if input("Vols configurar-lo ara? (y/N): ").lower() == 'y':
+            return cmd_2fa_setup(args, tfa_mgr)
+        return
+
+    Logger.success(f"2FA actiu")
+
+    # 2️⃣ Mostrar secret (confirmació)
+    if input("Vols mostrar el secret? (y/N): ").lower() == 'y':
+        tfa_mgr.show_credentials(data)
+
+    # 3️⃣ Test OTP (opcional)
+    if input("\nVols provar un codi OTP? (y/N): ").lower() != 'y':
+        return
+
+    otp = input("Codi 🔑 : ").strip()
+    if not otp:
+        return Logger.warning("Operació cancel·lada: codi buit.")
+    
+    verify_resp = tfa_mgr.verify(otp, resp.cookies)
+    if verify_resp:
+        payload = verify_resp.json()
+        if args.raw:
+            JsonFormatter(raw=True).show(payload)
+        else:
+            if payload.get('_success'):
+                Logger.success("Codi correcte!")
+            else:
+                Logger.error(f"Codi incorrecte: {payload.get('_msg')}")
+    else:
+        Logger.error("No s'ha rebut resposta del servidor en la verificació.")
+
 def main():
     description = (
         "🔐 CLI per a l'API iRedAdmin\n\n"
@@ -742,6 +854,20 @@ def main():
     session_parser.add_argument('-d', '--data', help='Dades a enviar en JSON o text (opcional)', default=None) 
     session_parser.set_defaults(func=cmd_session)
 
+    setup_2fa_parser = subparsers.add_parser(
+        '2fa-setup', 
+        help='Configura o regenera el 2FA per a l\'usuari actual', 
+        parents=[common_parser]
+    )
+    setup_2fa_parser.set_defaults(func=cmd_2fa_setup)
+    
+    check_2fa_parser = subparsers.add_parser(
+        '2fa-check', 
+        help='Test del 2FA per a l\'usuari actual', 
+        parents=[common_parser]
+    )
+    check_2fa_parser.set_defaults(func=cmd_2fa_check)
+
     args = parser.parse_args()
     # Autodetecció de terminal: si no és interactiva, forcem RAW
     if not sys.stdout.isatty():
@@ -765,10 +891,11 @@ def main():
     session_mgr = SessionManager()
     
     try:
-        if args.command in ('login', 'call', 'logout', 'session'):
+        if args.command in ('call', 'logout', 'session', 'login', '2fa-setup', '2fa-check'):
             args.func(args, session_mgr)
         else:
             args.func(args)
+
     except KeyboardInterrupt:
         print("\nAbortat per l'usuari.")
         sys.exit(130)
