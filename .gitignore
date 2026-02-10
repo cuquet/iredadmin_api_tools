@@ -41,3 +41,4 @@ iredapi_managerv*.py
 *reorder_commits.sh
 *.sh
 *.zip
+tools.code-workspace

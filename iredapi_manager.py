@@ -36,6 +36,15 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from http.cookiejar import MozillaCookieJar
 from collections import OrderedDict
 
+# Exit codes (conveni UNIX)
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_AUTH_FAILED = 2
+EXIT_2FA_FAILED = 3
+EXIT_HTTP_ERROR = 4
+EXIT_INVALID_INPUT = 5
+EXIT_INTERRUPTED = 130
+
 API_BASE = os.getenv('IREDAPI_URL', 'https://localhost/iredadmin/api')
 COOKIE_FILE = os.path.expanduser('~/.iredapi_cookies.txt')
 # Detectar RAW mode via variable d'entorn
@@ -43,7 +52,7 @@ RAW_MODE = os.getenv('IREDAPI_RAW', '0') == '1'
 DEBUG_ENABLED = os.getenv('IREDAPI_DEBUG', '0') == '1'
 MASK_SENSITIVE_DATA = os.getenv('IREDAPI_MASK_SENSITIVE', '1') != '0'  # per defecte, amaga dades sensibles
 # Nota: != '0' perquè quan és '0', no volem fer masking si també s'afegeix --show-secrets.
-SENSITIVE_KEYS = {'password', '2FA_required', 'session_id'}
+SENSITIVE_KEYS = ('password', '2FA_required', '2fa_secret', 'session_id')
 SPINNER_START_ICON = "🚗" # "🚀" "✈️" "🚗" "🏎️" "📡"
 SPINNER_END_ICON = "🏁" # "🛬" "🎯"
 
@@ -145,6 +154,8 @@ class JsonFormatter:
                 items = [_colorize(i, level + 1) for i in obj]
                 return '[\n' + ',\n'.join(f'{pad_next}{item}' for item in items) + f'\n{pad}]'
             elif isinstance(obj, str):
+                if MASK_SENSITIVE_DATA and obj.startswith(SENSITIVE_KEYS):
+                    return f'{AnsiColor.RED}"{obj.split(":")[0]}:***"{AnsiColor.RESET}'
                 return f'{AnsiColor.GREEN}"{obj}"{AnsiColor.RESET}'
             elif isinstance(obj, bool):
                 return f'{AnsiColor.CYAN}{obj}{AnsiColor.RESET}'
@@ -474,9 +485,15 @@ class SessionManager:
                 log_debug(f"  - {err}")
             return None
 
-        if not self.ensure_credentials(args) or not cmd_login(args, self):
+        if not self.ensure_credentials(args):
             log_debug("No s'han pogut garantir les credencials per tornar a fer login.")
             return None
+
+        rc = cmd_login(args, self)
+        if rc != EXIT_OK:
+            log_debug(f"No s'ha pogut iniciar sessió. (rc={rc})")
+            return None
+
         Logger.info("Sessió iniciada correctament. Reintentant la crida 🔁...")
 
         # 🔁 Torna a carregar headers i cookies després del login
@@ -558,15 +575,17 @@ def cmd_logout(args, session_mgr):
 
     if success:
         Logger.success("Sessió tancada 👋.", raw=args.raw)
+        return EXIT_OK
     else:
         log_error("No s'ha pogut tancar la sessió completament.", raw=args.raw)
         for err in errors:
             log_debug(err)
+        return EXIT_ERROR
 
 def cmd_login(args, session_mgr):
     resp = None
     if not session_mgr.ensure_credentials(args):
-        return False
+        return EXIT_INVALID_INPUT
     
     payload_json = json.dumps({'username': args.username, 'password': args.password})
 
@@ -578,14 +597,14 @@ def cmd_login(args, session_mgr):
         spinner.stop()
         log_error(f"Error durant l'autenticació: {str(e)}", raw=args.raw)
         log_debug(f"❌ Excepció: {type(e).__name__} -> {e}")
-        return False  # ❌ Fallada durant la petició
+        return EXIT_HTTP_ERROR
     finally:
         spinner.stop()
         log_debug(f"🌐 Resposta: {resp}")
 
     if resp is None:
         # Ja s'ha mostrat error dins cmd_call, només sortim
-        return False
+        return EXIT_HTTP_ERROR
 
     payload = resp.json()
     if payload.get('_msg') == '2FA_REQUIRED':
@@ -594,21 +613,21 @@ def cmd_login(args, session_mgr):
         totp = input("Introdueix el codi OTP 🔑 : ")
         
         resp = tfa_mgr.verify(totp, resp.cookies)
-        if not resp: return False
+        if not resp: return EXIT_2FA_FAILED
         payload = resp.json()
     
-    if payload.get('_success') and payload.get('_msg') in ('LOGIN_SUCCESS', '2FA_VERIFIED_SUCCESS'): 
-        tfa_mgr.session_mgr.save_cookie(resp, domain=args.url.split('//')[-1].split('/')[0])  # extreu domini
+    if payload.get('_success') and payload.get('_msg', '') in ('LOGIN_SUCCESS', '2FA_VERIFIED_SUCCESS'): 
+        session_mgr.save_cookie(resp, domain=args.url.split('//')[-1].split('/')[0])  # extreu domini
         
         if args.raw:
             JsonFormatter(raw=args.raw).show((True, {'_msg': payload['_msg'], '_data': payload['_data']}))
         else:
             Logger.success(f"Login correcte ({payload['_msg']}). Sessió guardada.")
-        return True
+        return EXIT_OK
     else:
         msg= f"Error d'autenticació: {payload.get('_msg', 'Error desconegut')}"
         log_error(msg, raw=args.raw)
-        return False
+        return EXIT_AUTH_FAILED
 
 def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False):
     """
@@ -632,8 +651,12 @@ def cmd_call(args, session_mgr, url=None, method=None, data=None, internal=False
     # ✨ Si no és internal i no tenim sessió activa, forcem login
     if not internal and not session_mgr.is_session_valid():
         Logger.info(f"[cmd_call] No hi ha sessió activa. S'inicia login interactiu...", raw=args.raw)
-        if not session_mgr.ensure_credentials(args) or not cmd_login(args, session_mgr):
+        if not session_mgr.ensure_credentials(args):
             log_error(f"No s'ha pogut iniciar sessió.", raw=args.raw)
+            return None
+        rc = cmd_login(args, session_mgr)
+        if rc != EXIT_OK:
+            log_error(f"No s'ha pogut iniciar sessió. (rc={rc})", raw=args.raw)
             return None
     
     request_kwargs, headers = session_mgr.get_request_kwargs(args, method, data)
@@ -721,6 +744,7 @@ def cmd_session(args, session_mgr):
         data=None, 
         internal=False
     )
+    return EXIT_OK
 
 def cmd_2fa_setup(args, session_mgr):
     tfa_mgr = TwoFactorManager(args, session_mgr)
@@ -763,7 +787,7 @@ def cmd_2fa_check(args, session_mgr):
     resp = tfa_mgr.get_status()
     if not resp:
         Logger.error("No s'ha pogut obtenir info 2FA.")
-        return
+        return EXIT_HTTP_ERROR
 
     data = resp.json().get('_data', {})
 
@@ -797,8 +821,10 @@ def cmd_2fa_check(args, session_mgr):
                 Logger.success("Codi correcte!")
             else:
                 Logger.error(f"Codi incorrecte: {payload.get('_msg')}")
+            return EXIT_OK
     else:
         Logger.error("No s'ha rebut resposta del servidor en la verificació.")
+        return EXIT_ERROR
 
 def main():
     description = (
@@ -886,15 +912,15 @@ def main():
         MASK_SENSITIVE_DATA = False
     
     if DEBUG_ENABLED:
-        Logger.info("🐛 [DEBUG] mode actiu")
+        Logger.info(" 🐛 [DEBUG] mode actiu")
 
     session_mgr = SessionManager()
     
     try:
         if args.command in ('call', 'logout', 'session', 'login', '2fa-setup', '2fa-check'):
-            args.func(args, session_mgr)
+            rc = args.func(args, session_mgr)
         else:
-            args.func(args)
+            rc = args.func(args)
 
     except KeyboardInterrupt:
         print("\nAbortat per l'usuari.")
@@ -902,6 +928,9 @@ def main():
     except Exception as e:
         Logger.error(f"Error inesperat: {e}")
         sys.exit(2)
+    
+    if isinstance(rc, int):
+        sys.exit(rc)
 
 if __name__ == '__main__':
     main()
