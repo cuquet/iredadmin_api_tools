@@ -347,9 +347,11 @@ Pots afegir `source ~/.iredapi.env` al teu `~/.bashrc`, `~/.zshrc` o `~/.profile
 
 
 ## 📄 Llicència
-
-Aquest projecte està disponible sota la llicència MIT. Consulta el fitxer `LICENSE` per a més informació.
+Aquest projecte està disponible sota la llicència [MIT](https://choosealicense.com/licenses/mit/). Consulta el fitxer `LICENSE` per a més informació.
 
 ## 🙌 Crèdits
-
 Desenvolupat per cuque@gmail.com. Inspirat en l'ús de l’API REST d’iRedAdmin.
+
+## 🤝 Contribucions
+Les contribucions són benvingudes! Si tens idees, millores o correccions, obre un issue o envia un pull request.
+[![PayPal - Donate](https://img.shields.io/badge/PayPal-Donate-005EA6?logo=paypal&logoColor=white)](https://www.paypal.me/cuquet74)
